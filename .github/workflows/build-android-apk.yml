@@ -40,6 +40,20 @@ jobs:
       - name: Construire l'APK de validation
         run: flutter build apk --debug
 
+      - name: Préparer l'APK installable de validation
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp build/app/outputs/flutter-apk/app-debug.apk dist/GESTCOURS_PROF_ANDROID_V0_5_2_INSTALLATION_TEST.apk
+
+      - name: Publier l'APK installable de validation
+        uses: actions/upload-artifact@v4
+        with:
+          name: GESTCOURS_PROF_ANDROID_V0_5_2_INSTALLATION_TEST
+          path: dist/GESTCOURS_PROF_ANDROID_V0_5_2_INSTALLATION_TEST.apk
+          if-no-files-found: error
+          retention-days: 30
+
       - name: Restaurer la signature Android stable
         if: ${{ env.STABLE_KEYSTORE_B64 != '' }}
         shell: bash
@@ -71,7 +85,8 @@ jobs:
         if: ${{ env.STABLE_KEYSTORE_B64 == '' }}
         shell: bash
         run: |
-          echo '### Compilation réussie — APK stable non publié' >> "$GITHUB_STEP_SUMMARY"
+          echo '### APK de validation publié — signature stable absente' >> "$GITHUB_STEP_SUMMARY"
           echo '' >> "$GITHUB_STEP_SUMMARY"
-          echo 'Le code compile correctement.' >> "$GITHUB_STEP_SUMMARY"
-          echo 'Ajoutez le secret `GESTCOURS_DEBUG_KEYSTORE_B64` pour publier un APK compatible avec les installations existantes.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Un APK installable de validation est disponible dans les artifacts.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Il peut nécessiter une désinstallation avant une future APK signée avec une autre clé.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Ajoutez le secret `GESTCOURS_DEBUG_KEYSTORE_B64` pour publier un APK stable compatible avec les installations existantes.' >> "$GITHUB_STEP_SUMMARY"
