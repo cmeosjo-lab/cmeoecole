@@ -56,18 +56,63 @@ class TeacherEvent {
         status: (json['_mobileStatus'] ?? 'pending').toString(),
       );
 
-  /// Format compatible V6 : les champs mobiles privés commencent par _mobile et
-  /// ne sont pas envoyés au Principal. Le payload métier est fusionné à la racine.
-  Map<String, dynamic> toProtocolV6Json() => {
-        'id': id,
-        'category': type,
-        'teacher': teacher,
-        'studentId': studentId,
-        'classId': classId,
-        if (deviceId.isNotEmpty) 'deviceId': deviceId,
-        'createdAt': createdAt.toIso8601String(),
-        ...payload,
-      };
+  bool get supportedByPrincipalV167 => const {
+        'attendance',
+        'evaluation',
+        'communication',
+        'quranValidation',
+        'quran_validation',
+        'homework',
+        'annualAppreciation',
+        'annual_appreciation',
+      }.contains(type);
+
+  String get protocolType {
+    if (type == 'quranValidation') return 'quran_validation';
+    if (type == 'annualAppreciation') return 'annual_appreciation';
+    return type;
+  }
+
+  String get unsupportedLabel {
+    if (type == 'lessonFollowUp') return 'suivi de leçon';
+    return type;
+  }
+
+  Map<String, dynamic> toProtocolV6Json() {
+    final result = <String, dynamic>{
+      'id': id,
+      'teacher': teacher,
+      'type': protocolType,
+      'studentId': studentId,
+      'classId': classId,
+      if (deviceId.isNotEmpty) 'deviceId': deviceId,
+      'createdAt': createdAt.toIso8601String(),
+    };
+
+    switch (protocolType) {
+      case 'attendance':
+        result['attendance'] = payload;
+        break;
+      case 'evaluation':
+        result['evaluation'] = payload;
+        break;
+      case 'communication':
+        result['communication'] = payload;
+        break;
+      case 'quran_validation':
+        result['quranValidation'] = payload;
+        break;
+      case 'homework':
+        result['homework'] = payload;
+        break;
+      case 'annual_appreciation':
+        result['annualAppreciation'] = payload;
+        break;
+      default:
+        result['payload'] = payload;
+    }
+    return result;
+  }
 
   Map<String, dynamic> toLocalJson() => {
         'id': id,

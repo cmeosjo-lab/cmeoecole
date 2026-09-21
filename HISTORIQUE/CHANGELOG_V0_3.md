@@ -5,7 +5,7 @@
 - Versets De / À adaptés automatiquement à la Sourate choisie.
 - Hizb en rideau avec numéro + nom arabe du Principal.
 - Juz en rideau avec numéro + nom arabe du Principal.
-- Incidents : nature en rideau, priorité, description.
+- Incidents : nature en rideau, priorité et description.
 - Suivi de leçons : matière en rideau puis leçon en rideau.
 - Absence : date + justifiée/non justifiée.
 - Retard : date + justifié/non justifié + heure d'arrivée obligatoire.
