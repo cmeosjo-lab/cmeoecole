@@ -16,19 +16,110 @@ class IncidentScreen extends StatefulWidget {
 }
 
 class _IncidentScreenState extends State<IncidentScreen> {
+  String family = 'Discipline';
   String? nature;
-  String priority = 'normal';
-  final message = TextEditingController();
+  String? presetRemark;
+  String priority = 'Normal';
+  final extra = TextEditingController();
+
+  static const Map<String, List<String>> builtIn = {
+    'Discipline': ['Bavardage', 'Grossièreté', 'Téléphone', 'Bagarre', 'Insolence', 'Harcèlement'],
+    'Matériel': ['Non apporté', 'En mauvais état'],
+    'Devoirs': ['Fait partiellement', 'Non fait'],
+  };
+
+  static const Map<String, List<String>> remarks = {
+    'Bavardage': [
+      'Bavardages répétés malgré plusieurs rappels.',
+      'Perturbe le déroulement du cours par ses bavardages.',
+      'Bavardage ponctuel pendant le cours.',
+    ],
+    'Grossièreté': [
+      'Paroles déplacées envers un autre élève.',
+      'Propos grossiers pendant le cours.',
+      'Langage inadapté malgré un rappel.',
+    ],
+    'Téléphone': [
+      'Utilisation du téléphone pendant le cours.',
+      'Téléphone audible pendant le cours.',
+      'Refus de ranger le téléphone après rappel.',
+    ],
+    'Bagarre': [
+      'Altercation physique avec un autre élève.',
+      'Coups portés lors d’une dispute.',
+      'Provocation ayant entraîné une altercation.',
+    ],
+    'Insolence': [
+      'Réponse irrespectueuse à l’adulte.',
+      "Refus d'obéir à une consigne.",
+      'Attitude provocatrice pendant le cours.',
+    ],
+    'Harcèlement': [
+      'Comportement de harcèlement verbal signalé.',
+      'Comportement de harcèlement physique signalé.',
+      'Comportement de harcèlement numérique signalé.',
+    ],
+    'Non apporté': [
+      'Matériel demandé non apporté.',
+      'Livre ou cahier nécessaire non apporté.',
+      'Mushaf non apporté.',
+    ],
+    'En mauvais état': [
+      'Matériel apporté en mauvais état.',
+      'Livre ou cahier en mauvais état.',
+    ],
+    'Fait partiellement': [
+      'Devoir fait partiellement.',
+      'Travail incomplet.',
+      'Exercices réalisés seulement en partie.',
+    ],
+    'Non fait': [
+      'Devoir non fait.',
+      'Aucun travail rendu.',
+      'Leçon ou exercices non préparés.',
+    ],
+  };
+
+  String _today() {
+    final d = DateTime.now();
+    return '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year.toString().padLeft(4, '0')}';
+  }
 
   List<String> get natures {
-    final fromPrincipal = widget.snapshot.references.incidentTypes;
-    if (fromPrincipal.isNotEmpty) return fromPrincipal;
-    return const ['Discipline', 'Comportement', 'Matériel', 'Travail / devoir', 'Respect / langage', 'Sécurité', 'Autre'];
+    final base = List<String>.from(builtIn[family] ?? const <String>[]);
+    if (family == 'Autre') {
+      final fromPrincipal = widget.snapshot.references.incidentTypes;
+      if (fromPrincipal.isNotEmpty) base.addAll(fromPrincipal);
+      if (base.isEmpty) base.add('Autre');
+    }
+    return base.toSet().toList();
+  }
+
+  List<String> get remarkChoices => List<String>.from(remarks[nature] ?? const <String>[]);
+
+  String get category {
+    final n = (nature ?? '').trim();
+    if (family == 'Discipline') return 'Discipline — $n';
+    if (family == 'Matériel') return 'Matériel — $n';
+    if (family == 'Devoirs') return 'Devoir — $n';
+    return n.isEmpty ? 'Autre' : n;
+  }
+
+  String get finalRemark {
+    final p = (presetRemark ?? '').trim();
+    final e = extra.text.trim();
+    if (p.isEmpty) return e;
+    if (e.isEmpty) return p;
+    return '$p $e';
   }
 
   Future<void> save() async {
-    if (nature == null || message.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Choisir la nature et décrire l’incident.')));
+    if (nature == null || nature!.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Choisir la nature du signalement.')));
+      return;
+    }
+    if (finalRemark.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Choisir une remarque ou ajouter un commentaire.')));
       return;
     }
     final deviceId = await widget.store.getOrCreateDeviceId();
@@ -39,16 +130,16 @@ class _IncidentScreenState extends State<IncidentScreen> {
       classId: widget.student.classId,
       deviceId: deviceId,
       payload: {
-        'kind': 'incident',
-        'subject': 'Incident disciplinaire',
-        'nature': nature,
+        'date': _today(),
+        'category': category,
+        'subject': 'Signalement : $category',
         'priority': priority,
-        'message': message.text.trim(),
+        'message': finalRemark,
       },
     );
     await widget.store.enqueue(event);
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Incident enregistré et placé en attente de transmission.')));
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Signalement enregistré et placé en attente de transmission.')));
     Navigator.pop(context, true);
   }
 
@@ -60,38 +151,58 @@ class _IncidentScreenState extends State<IncidentScreen> {
           child: ListView(
             keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
             physics: const AlwaysScrollableScrollPhysics(),
-            padding: EdgeInsets.fromLTRB(
-              16,
-              16,
-              16,
-              48 + MediaQuery.of(context).padding.bottom + MediaQuery.of(context).viewInsets.bottom,
-            ),
+            padding: EdgeInsets.fromLTRB(16, 16, 16, 48 + MediaQuery.of(context).padding.bottom + MediaQuery.of(context).viewInsets.bottom),
             children: [
-            Text('Incident — ${widget.student.displayName}', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800)),
-            const SizedBox(height: 16),
-            DropdownButtonFormField<String>(
-              value: nature,
-              isExpanded: true,
-              decoration: const InputDecoration(labelText: 'Nature de l’incident'),
-              items: natures.map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(),
-              onChanged: (v) => setState(() => nature = v),
-            ),
-            const SizedBox(height: 12),
-            DropdownButtonFormField<String>(
-              value: priority,
-              decoration: const InputDecoration(labelText: 'Priorité'),
-              items: const [
-                DropdownMenuItem(value: 'normal', child: Text('Normale')),
-                DropdownMenuItem(value: 'important', child: Text('Importante')),
-                DropdownMenuItem(value: 'urgent', child: Text('Urgente')),
+              Text('Signalement — ${widget.student.displayName}', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800)),
+              const SizedBox(height: 16),
+              DropdownButtonFormField<String>(
+                value: family,
+                decoration: const InputDecoration(labelText: 'Catégorie'),
+                items: const ['Discipline', 'Matériel', 'Devoirs', 'Autre'].map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(),
+                onChanged: (v) => setState(() {
+                  family = v ?? 'Discipline';
+                  nature = null;
+                  presetRemark = null;
+                }),
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                value: nature,
+                isExpanded: true,
+                decoration: const InputDecoration(labelText: 'Nature'),
+                items: natures.map((e) => DropdownMenuItem(value: e, child: Text(e))).toList(),
+                onChanged: (v) => setState(() {
+                  nature = v;
+                  presetRemark = null;
+                }),
+              ),
+              if (remarkChoices.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String>(
+                  value: presetRemark,
+                  isExpanded: true,
+                  decoration: const InputDecoration(labelText: 'Remarque proposée'),
+                  items: remarkChoices.map((e) => DropdownMenuItem(value: e, child: Text(e, overflow: TextOverflow.ellipsis))).toList(),
+                  onChanged: (v) => setState(() => presetRemark = v),
+                ),
               ],
-              onChanged: (v) => setState(() => priority = v ?? 'normal'),
-            ),
-            const SizedBox(height: 12),
-            TextField(controller: message, maxLines: 5, decoration: const InputDecoration(labelText: 'Description / suite à donner')),
-            const SizedBox(height: 22),
-            FilledButton.icon(onPressed: save, icon: const Icon(Icons.send_outlined), label: const Text('Enregistrer pour le Principal')),
-          ]),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                value: priority,
+                decoration: const InputDecoration(labelText: 'Priorité'),
+                items: const [
+                  DropdownMenuItem(value: 'Normal', child: Text('Normale')),
+                  DropdownMenuItem(value: 'Important', child: Text('Importante')),
+                  DropdownMenuItem(value: 'Urgent', child: Text('Urgente')),
+                ],
+                onChanged: (v) => setState(() => priority = v ?? 'Normal'),
+              ),
+              const SizedBox(height: 12),
+              TextField(controller: extra, maxLines: 4, decoration: const InputDecoration(labelText: 'Complément facultatif')),
+              const SizedBox(height: 22),
+              FilledButton.icon(onPressed: save, icon: const Icon(Icons.save_outlined), label: const Text('Enregistrer pour le Principal')),
+            ],
+          ),
         ),
       );
 }

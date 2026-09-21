@@ -35,13 +35,12 @@ class PrincipalApi {
     try {
       final r = await http.get(
         _uri(c, '/api/v1/reference-data', {'teacher': c.teacher, 'code': c.code}),
-        headers: {'Accept': 'application/json', 'User-Agent': 'ECOLE-Gestion-Prof-Mobile/0.3'},
+        headers: {'Accept': 'application/json', 'User-Agent': 'ECOLE-Gestion-Prof-Mobile/0.4.1'},
       ).timeout(timeout);
       if (r.statusCode < 200 || r.statusCode >= 300 || r.bodyBytes.isEmpty) return null;
       final decoded = jsonDecode(utf8.decode(r.bodyBytes));
       return decoded is Map ? Map<String, dynamic>.from(decoded) : null;
     } catch (_) {
-      // V1.6.7 ne fournit pas encore obligatoirement cet endpoint : la synchro V6 reste fonctionnelle.
       return null;
     }
   }
@@ -49,7 +48,7 @@ class PrincipalApi {
   Future<SyncSnapshot> sync(PrincipalConfig c) async {
     final r = await http.get(
       _uri(c, '/api/v1/sync', {'teacher': c.teacher, 'code': c.code}),
-      headers: {'Accept': 'application/json', 'User-Agent': 'ECOLE-Gestion-Prof-Mobile/0.3'},
+      headers: {'Accept': 'application/json', 'User-Agent': 'ECOLE-Gestion-Prof-Mobile/0.4.1'},
     ).timeout(timeout);
 
     if (r.statusCode < 200 || r.statusCode >= 300) {
@@ -61,9 +60,6 @@ class PrincipalApi {
     if (snapshot.protocolVersion != 0 && snapshot.protocolVersion != supportedProtocol) {
       throw PrincipalApiException('Version de protocole incompatible : Principal ${snapshot.protocolVersion}, mobile $supportedProtocol.');
     }
-
-    // Extension non bloquante : permet au Principal d'envoyer les noms arabes,
-    // les leçons et les natures d'incident sans casser la compatibilité V6.
     final references = await _referenceData(c);
     if (references != null && references.isNotEmpty) snapshot = snapshot.mergeReferenceData(references);
     return snapshot;
@@ -81,7 +77,7 @@ class PrincipalApi {
       headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
       body: jsonEncode(body),
     ).timeout(timeout);
-    if (r.statusCode < 200 || r.statusCode >= 300) throw PrincipalApiException('Transmission refusée (${r.statusCode}).');
+    if (r.statusCode < 200 || r.statusCode >= 300) throw PrincipalApiException('Transmission refusée (${r.statusCode}) : ${utf8.decode(r.bodyBytes).trim()}');
     if (r.bodyBytes.isEmpty) return {'received': events.length};
     final decoded = jsonDecode(utf8.decode(r.bodyBytes));
     return decoded is Map ? Map<String, dynamic>.from(decoded) : {'received': events.length};

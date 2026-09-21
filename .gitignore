@@ -40,3 +40,18 @@ Thumbs.db
 *.aab
 *.ipa
 *.exe
+
+# Données personnelles / exports supplémentaires
+*.pdf
+*.doc
+*.docx
+*.zip
+captures_reelles/
+documents_eleves/
+exports_reels/
+sauvegardes/
+backups/
+secrets/
+
+# Clé Android stable : conserver hors dépôt public / utiliser un secret GitHub
+ci/test_debug_keystore.b64

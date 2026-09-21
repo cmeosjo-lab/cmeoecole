@@ -1,0 +1,16 @@
+GESTCOURS PROF MOBILE — INTERFACE MODERNE
+
+Base fonctionnelle : V0.5.0+7 / protocole réseau V6.
+Évolution de présentation : V0.5.2+9.
+
+AUCUN changement volontaire du protocole de synchronisation.
+La modernisation porte sur :
+- identité visuelle GESTCOURS ;
+- bandeau établissement / professeur ;
+- cartes et actions ;
+- formulaires et boutons ;
+- écran de connexion au Principal ;
+- présentation des classes.
+
+Le nom de l'établissement et les données élèves ne sont pas codés en dur.
+Ils proviennent de la synchronisation avec le Principal.

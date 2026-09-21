@@ -1,0 +1,11 @@
+GESTCOURS MOBILE — EVOLUTION STABLE
+Base : V0.5.0+7
+Evolution interne : V0.5.1+8
+
+Modifications ciblées :
+- conservation de la logique et de la synchronisation V0.5 ;
+- signalements en rideaux : Discipline / Matériel / Devoirs ;
+- natures disciplinaires : Bavardage, Grossièreté, Téléphone, Bagarre, Insolence, Harcèlement ;
+- remarques proposées en second rideau ;
+- commentaire complémentaire facultatif ;
+- données conservées localement jusqu'à accusé de réception du Principal.

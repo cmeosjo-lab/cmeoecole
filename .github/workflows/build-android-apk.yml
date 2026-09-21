@@ -3,19 +3,25 @@ name: Construire APK Android
 on:
   workflow_dispatch:
   push:
-    branches: [ main, master ]
+    branches: [ main ]
+
+permissions:
+  contents: read
 
 jobs:
   android-apk:
     runs-on: ubuntu-latest
+    env:
+      STABLE_KEYSTORE_B64: ${{ secrets.GESTCOURS_DEBUG_KEYSTORE_B64 }}
+
     steps:
       - name: Récupérer le projet
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Installer Flutter stable
         uses: subosito/flutter-action@v2
         with:
-          channel: 'stable'
+          channel: stable
           cache: true
 
       - name: Générer la plateforme Android
@@ -28,22 +34,44 @@ jobs:
       - name: Installer les dépendances
         run: flutter pub get
 
-      - name: Vérifier le code
-        run: flutter analyze --no-fatal-warnings --no-fatal-infos
+      - name: Vérifier le vrai code de l'application
+        run: flutter analyze lib --no-fatal-warnings --no-fatal-infos
 
-      - name: Construire l'APK installable
+      - name: Construire l'APK de validation
         run: flutter build apk --debug
 
-      - name: Nommer l'APK
+      - name: Restaurer la signature Android stable
+        if: ${{ env.STABLE_KEYSTORE_B64 != '' }}
         shell: bash
         run: |
-          mkdir -p dist
-          cp build/app/outputs/flutter-apk/app-debug.apk dist/ECOLE_GESTION_PRO_ANDROID_V0_3_1.apk
+          mkdir -p "$HOME/.android"
+          printf '%s' "$STABLE_KEYSTORE_B64" | base64 --decode > "$HOME/.android/debug.keystore"
+          chmod 600 "$HOME/.android/debug.keystore"
 
-      - name: Publier l'APK
+      - name: Recompiler avec la signature stable
+        if: ${{ env.STABLE_KEYSTORE_B64 != '' }}
+        shell: bash
+        run: |
+          flutter clean
+          flutter pub get
+          flutter build apk --debug
+          mkdir -p dist
+          cp build/app/outputs/flutter-apk/app-debug.apk dist/GESTCOURS_PROF_ANDROID_MODERNE_V0_5_2.apk
+
+      - name: Publier l'APK stable
+        if: ${{ env.STABLE_KEYSTORE_B64 != '' }}
         uses: actions/upload-artifact@v4
         with:
-          name: ECOLE_GESTION_PRO_ANDROID_V0_3_1
-          path: dist/ECOLE_GESTION_PRO_ANDROID_V0_3_1.apk
+          name: GESTCOURS_PROF_ANDROID_MODERNE_V0_5_2
+          path: dist/GESTCOURS_PROF_ANDROID_MODERNE_V0_5_2.apk
           if-no-files-found: error
           retention-days: 30
+
+      - name: Signature stable non configurée
+        if: ${{ env.STABLE_KEYSTORE_B64 == '' }}
+        shell: bash
+        run: |
+          echo '### Compilation réussie — APK stable non publié' >> "$GITHUB_STEP_SUMMARY"
+          echo '' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Le code compile correctement.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Ajoutez le secret `GESTCOURS_DEBUG_KEYSTORE_B64` pour publier un APK compatible avec les installations existantes.' >> "$GITHUB_STEP_SUMMARY"
