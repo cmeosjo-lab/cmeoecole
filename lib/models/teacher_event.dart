@@ -56,27 +56,53 @@ class TeacherEvent {
         status: (json['_mobileStatus'] ?? 'pending').toString(),
       );
 
-  bool get supportedByPrincipalV167 => const {
+  bool get supportedByPrincipal => const {
         'attendance',
         'evaluation',
         'communication',
         'quranValidation',
         'quran_validation',
+        'quranProgress',
+        'quran_progress',
         'homework',
+        'lessonFollowUp',
+        'lesson_follow_up',
         'annualAppreciation',
         'annual_appreciation',
       }.contains(type);
 
   String get protocolType {
     if (type == 'quranValidation') return 'quran_validation';
+    if (type == 'quranProgress') return 'quran_progress';
+    if (type == 'lessonFollowUp') return 'lesson_follow_up';
     if (type == 'annualAppreciation') return 'annual_appreciation';
     return type;
   }
 
-  String get unsupportedLabel {
-    if (type == 'lessonFollowUp') return 'suivi de leçon';
-    return type;
+  String get displayType {
+    switch (protocolType) {
+      case 'attendance':
+        return (payload['status'] ?? 'Assiduité').toString();
+      case 'evaluation':
+        return 'Évaluation';
+      case 'communication':
+        return (payload['category'] ?? 'Message / incident').toString();
+      case 'quran_validation':
+        return '${payload['kind'] ?? 'Coran'} validé';
+      case 'quran_progress':
+        return 'Progression Coran';
+      case 'homework':
+        return 'Devoir / consigne';
+      case 'lesson_follow_up':
+        return 'Suivi de leçon';
+      case 'annual_appreciation':
+        return 'Appréciation annuelle';
+      default:
+        return protocolType;
+    }
   }
+
+  String get unsupportedLabel => displayType;
 
   Map<String, dynamic> toProtocolV6Json() {
     final result = <String, dynamic>{
@@ -102,8 +128,14 @@ class TeacherEvent {
       case 'quran_validation':
         result['quranValidation'] = payload;
         break;
+      case 'quran_progress':
+        result['quranProgress'] = payload;
+        break;
       case 'homework':
         result['homework'] = payload;
+        break;
+      case 'lesson_follow_up':
+        result['lessonFollowUp'] = payload;
         break;
       case 'annual_appreciation':
         result['annualAppreciation'] = payload;
@@ -126,15 +158,25 @@ class TeacherEvent {
         '_mobileStatus': status,
       };
 
-  TeacherEvent copyWithStatus(String newStatus) => TeacherEvent(
-        id: id,
-        type: type,
-        teacher: teacher,
-        studentId: studentId,
-        classId: classId,
-        deviceId: deviceId,
-        createdAt: createdAt,
-        payload: payload,
-        status: newStatus,
-      );
+  TeacherEvent copyWithStatus(String newStatus, {String? reviewNote}) {
+    final nextPayload = Map<String, dynamic>.from(payload);
+    if (reviewNote != null) {
+      if (reviewNote.trim().isEmpty) {
+        nextPayload.remove('_reviewNote');
+      } else {
+        nextPayload['_reviewNote'] = reviewNote.trim();
+      }
+    }
+    return TeacherEvent(
+      id: id,
+      type: type,
+      teacher: teacher,
+      studentId: studentId,
+      classId: classId,
+      deviceId: deviceId,
+      createdAt: createdAt,
+      payload: nextPayload,
+      status: newStatus,
+    );
+  }
 }
