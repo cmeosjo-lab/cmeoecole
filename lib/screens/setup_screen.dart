@@ -207,7 +207,7 @@ class _SetupScreenState extends State<SetupScreen> {
                                 ),
                                 const SizedBox(height: 14),
                                 const Text(
-                                  'Connexion simple',
+                                  'Connexion au Principal',
                                   style: TextStyle(
                                     color: Colors.white,
                                     fontSize: 23,
