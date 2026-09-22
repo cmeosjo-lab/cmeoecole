@@ -1,10 +1,11 @@
-# GESTCOURS PROF MOBILE V0.5.2
+# GESTCOURS PROF MOBILE V0.5.4
 
 Application Prof mobile locale **Android + iOS**, conçue pour fonctionner avec le **PC Principal GESTCOURS** sur le réseau local.
 
 ## Fonctions actuelles
 
-- connexion au Principal par IP/port + professeur + code ;
+- connexion au Principal par adresse du PC + code professeur à 6 chiffres ;
+- adresse et code mémorisés après la première connexion ;
 - QR code facultatif ;
 - synchronisation protocole V6 et travail hors connexion ;
 - classes et élèves autorisés pour le professeur ;
