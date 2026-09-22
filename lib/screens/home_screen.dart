@@ -104,26 +104,6 @@ class _HomeScreenState extends State<HomeScreen> {
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Sauvegarde locale copiée dans le presse-papiers. Conservez-la dans un fichier texte privé.')));
   }
 
-  Future<void> restoreLocal() async {
-    final c = TextEditingController();
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Restaurer une sauvegarde locale'),
-        content: SizedBox(width: 680, child: TextField(controller: c, maxLines: 12, decoration: const InputDecoration(hintText: 'Collez ici la sauvegarde JSON'))),
-        actions: [TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Annuler')), FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Restaurer'))],
-      ),
-    );
-    if (ok != true || c.text.trim().isEmpty) return;
-    try {
-      await widget.store.importBundle(c.text.trim());
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Sauvegarde restaurée.')));
-      await load();
-    } catch (_) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Sauvegarde invalide.')));
-    }
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -137,13 +117,11 @@ class _HomeScreenState extends State<HomeScreen> {
             onSelected: (v) async {
               if (v == 'log') await showSyncLog();
               if (v == 'backup') await backupLocal();
-              if (v == 'restore') await restoreLocal();
               if (v == 'disconnect') { await widget.store.clearConfig(); widget.onDisconnect(); }
             },
             itemBuilder: (_) => const [
               PopupMenuItem(value: 'log', child: Text('Journal de synchronisation')),
               PopupMenuItem(value: 'backup', child: Text('Sauvegarder les données locales')),
-              PopupMenuItem(value: 'restore', child: Text('Restaurer une sauvegarde')),
               PopupMenuItem(value: 'disconnect', child: Text('Déconnecter cet appareil')),
             ],
           ),

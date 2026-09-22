@@ -3,7 +3,7 @@ name: Construire APK Android
 on:
   workflow_dispatch:
   push:
-    branches: [ main ]
+    branches: [ main, gestcours-v0.5.4-reseau-fiable ]
 
 permissions:
   contents: read
@@ -44,13 +44,13 @@ jobs:
         shell: bash
         run: |
           mkdir -p dist
-          cp build/app/outputs/flutter-apk/app-debug.apk dist/GESTCOURS_PROF_ANDROID_V0_5_3_CONNEXION_SIMPLE.apk
+          cp build/app/outputs/flutter-apk/app-debug.apk dist/GESTCOURS_PROF_ANDROID_V0_5_4.apk
 
       - name: Publier l'APK installable de validation
         uses: actions/upload-artifact@v4
         with:
-          name: GESTCOURS_PROF_ANDROID_V0_5_3_CONNEXION_SIMPLE
-          path: dist/GESTCOURS_PROF_ANDROID_V0_5_3_CONNEXION_SIMPLE.apk
+          name: GESTCOURS_PROF_ANDROID_V0_5_4
+          path: dist/GESTCOURS_PROF_ANDROID_V0_5_4.apk
           if-no-files-found: error
           retention-days: 30
 
@@ -70,14 +70,14 @@ jobs:
           flutter pub get
           flutter build apk --debug
           mkdir -p dist
-          cp build/app/outputs/flutter-apk/app-debug.apk dist/GESTCOURS_PROF_ANDROID_MODERNE_V0_5_3.apk
+          cp build/app/outputs/flutter-apk/app-debug.apk dist/GESTCOURS_PROF_ANDROID_MODERNE_V0_5_4.apk
 
       - name: Publier l'APK stable
         if: ${{ env.STABLE_KEYSTORE_B64 != '' }}
         uses: actions/upload-artifact@v4
         with:
-          name: GESTCOURS_PROF_ANDROID_MODERNE_V0_5_3
-          path: dist/GESTCOURS_PROF_ANDROID_MODERNE_V0_5_3.apk
+          name: GESTCOURS_PROF_ANDROID_MODERNE_V0_5_4
+          path: dist/GESTCOURS_PROF_ANDROID_MODERNE_V0_5_4.apk
           if-no-files-found: error
           retention-days: 30
 
@@ -85,7 +85,7 @@ jobs:
         if: ${{ env.STABLE_KEYSTORE_B64 == '' }}
         shell: bash
         run: |
-          echo '### APK V0.5.3 publiée — signature stable absente' >> "$GITHUB_STEP_SUMMARY"
+          echo '### APK V0.5.4 publiée — signature stable absente' >> "$GITHUB_STEP_SUMMARY"
           echo '' >> "$GITHUB_STEP_SUMMARY"
-          echo 'La connexion simple recherche automatiquement GESTCOURS Principal sur le port 47831.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'La connexion utilise l’adresse affichée dans GESTCOURS Principal et le code professeur à 6 chiffres ; le port 47831 est automatique.' >> "$GITHUB_STEP_SUMMARY"
           echo 'Ajoutez le secret `GESTCOURS_DEBUG_KEYSTORE_B64` pour publier un APK stable compatible avec les installations existantes.' >> "$GITHUB_STEP_SUMMARY"
