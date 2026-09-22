@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:http/http.dart' as http;
@@ -15,26 +14,29 @@ class PrincipalApiException implements Exception {
 
 class PrincipalApi {
   static const int supportedProtocol = 6;
-  static const int defaultPrincipalPort = 47831;
+  static const int defaultPort = 47831;
+  static const String mobileVersion = '0.5.5';
   final Duration timeout;
 
   const PrincipalApi({this.timeout = const Duration(seconds: 8)});
 
+  String get deviceName => 'Mobile ${Platform.operatingSystem}';
+
   Uri _uri(PrincipalConfig c, String path, [Map<String, String>? query]) =>
       Uri.parse('${c.baseUrl}$path').replace(queryParameters: query);
+
+  Map<String, String> _authQuery(PrincipalConfig c, String deviceId, {Map<String, String>? extra}) => {
+        'teacher': c.teacher,
+        'code': c.code,
+        if (deviceId.trim().isNotEmpty) 'deviceId': deviceId.trim(),
+        if (deviceId.trim().isNotEmpty) 'deviceName': deviceName,
+        ...?extra,
+      };
 
   Future<bool> ping(PrincipalConfig c) async {
     try {
       final r = await http.get(_uri(c, '/api/v1/ping')).timeout(timeout);
-      if (r.statusCode < 200 || r.statusCode >= 300) return false;
-      if (r.bodyBytes.isEmpty) return true;
-      final decoded = jsonDecode(utf8.decode(r.bodyBytes));
-      if (decoded is Map) {
-        final ok = decoded['ok'];
-        final version = int.tryParse((decoded['protocolVersion'] ?? '0').toString()) ?? 0;
-        return ok == true && (version == 0 || version == supportedProtocol);
-      }
-      return true;
+      return r.statusCode >= 200 && r.statusCode < 300;
     } on SocketException {
       return false;
     } catch (_) {
@@ -42,227 +44,71 @@ class PrincipalApi {
     }
   }
 
-  Future<String?> _probeHost(String host, int port) async {
+  Future<PrincipalConfig?> _pairHost(
+    String host,
+    String code, {
+    required String deviceId,
+    int port = defaultPort,
+    Duration? pairTimeout,
+  }) async {
     try {
-      final uri = Uri.parse('http://$host:$port/api/v1/ping');
-      final r = await http.get(uri).timeout(const Duration(milliseconds: 450));
-      if (r.statusCode != 200 || r.bodyBytes.isEmpty) return null;
-      final decoded = jsonDecode(utf8.decode(r.bodyBytes));
-      if (decoded is! Map) return null;
-      final ok = decoded['ok'] == true;
-      final version = int.tryParse((decoded['protocolVersion'] ?? '0').toString()) ?? 0;
-      if (ok && version == supportedProtocol) return host;
-    } catch (_) {}
-    return null;
-  }
-
-  Future<PrincipalConfig?> _pairHost(String host, String code,
-      {int port = defaultPrincipalPort, Duration timeout = const Duration(milliseconds: 650)}) async {
-    try {
-      final uri = Uri.parse('http://$host:$port/api/v1/pair')
-          .replace(queryParameters: {'code': code});
-      final r = await http.get(uri, headers: {'Accept': 'application/json'}).timeout(timeout);
+      final uri = Uri.parse('http://$host:$port/api/v1/pair').replace(queryParameters: {
+        'code': code,
+        if (deviceId.trim().isNotEmpty) 'deviceId': deviceId.trim(),
+        if (deviceId.trim().isNotEmpty) 'deviceName': deviceName,
+      });
+      final r = await http
+          .get(uri, headers: {'Accept': 'application/json', 'User-Agent': 'GESTCOURS-Prof-Mobile/$mobileVersion'})
+          .timeout(pairTimeout ?? const Duration(milliseconds: 650));
       if (r.statusCode != 200 || r.bodyBytes.isEmpty) return null;
       final decoded = jsonDecode(utf8.decode(r.bodyBytes));
       if (decoded is! Map) return null;
       final data = Map<String, dynamic>.from(decoded);
       final ok = data['ok'] == true;
-      final version = int.tryParse((data['protocolVersion'] ?? '0').toString()) ?? 0;
+      final protocol = int.tryParse((data['protocolVersion'] ?? '0').toString()) ?? 0;
       final teacher = (data['teacher'] ?? '').toString().trim();
       final returnedPort = int.tryParse((data['port'] ?? port).toString()) ?? port;
-      if (!ok || version != supportedProtocol || teacher.isEmpty) return null;
-      return PrincipalConfig(host: host, port: returnedPort, teacher: teacher, code: code);
-    } catch (_) {
-      return null;
-    }
-  }
-
-
-
-  Future<PrincipalConfig?> _discoverUdp(String code) async {
-    RawDatagramSocket? socket;
-    StreamSubscription<RawSocketEvent>? sub;
-    Timer? timer;
-    final completer = Completer<PrincipalConfig?>();
-    try {
-      socket = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
-      socket.broadcastEnabled = true;
-      final targets = <String>{'255.255.255.255'};
-      final interfaces = await NetworkInterface.list(
-        type: InternetAddressType.IPv4,
-        includeLoopback: false,
-        includeLinkLocal: false,
+      final authorized = data['deviceAuthorized'];
+      if (!ok || protocol != supportedProtocol || teacher.isEmpty) return null;
+      if (authorized == false) {
+        throw PrincipalApiException('Cet appareil est désactivé dans le Principal. Réactivez-le dans Réseau enseignants > Appareils autorisés.');
+      }
+      return PrincipalConfig(
+        host: host,
+        port: returnedPort,
+        teacher: teacher,
+        code: code,
       );
-      for (final interface in interfaces) {
-        for (final address in interface.addresses) {
-          final parts = address.address.split('.');
-          if (parts.length == 4) {
-            targets.add('${parts[0]}.${parts[1]}.${parts[2]}.255');
-          }
-        }
-      }
-      sub = socket.listen((event) {
-        if (event != RawSocketEvent.read || completer.isCompleted) return;
-        final datagram = socket?.receive();
-        if (datagram == null) return;
-        try {
-          final decoded = jsonDecode(utf8.decode(datagram.data));
-          if (decoded is! Map) return;
-          final data = Map<String, dynamic>.from(decoded);
-          if (data['ok'] != true) return;
-          final protocol = int.tryParse((data['protocolVersion'] ?? '0').toString()) ?? 0;
-          final teacher = (data['teacher'] ?? '').toString().trim();
-          var port = int.tryParse((data['port'] ?? '$defaultPrincipalPort').toString()) ?? defaultPrincipalPort;
-          if (protocol != supportedProtocol || teacher.isEmpty) return;
-          if (port <= 0) port = defaultPrincipalPort;
-          completer.complete(PrincipalConfig(
-            host: datagram.address.address,
-            port: port,
-            teacher: teacher,
-            code: code,
-          ));
-        } catch (_) {}
-      });
-      final payload = utf8.encode('GESTCOURS_DISCOVER_V6|$code');
-      for (final host in targets) {
-        try {
-          socket.send(payload, InternetAddress(host), 47832);
-        } catch (_) {}
-      }
-      timer = Timer(const Duration(milliseconds: 2800), () {
-        if (!completer.isCompleted) completer.complete(null);
-      });
-      return await completer.future;
+    } on PrincipalApiException {
+      rethrow;
     } catch (_) {
       return null;
-    } finally {
-      timer?.cancel();
-      await sub?.cancel();
-      socket?.close();
     }
   }
 
-  Future<String?> discoverPrincipal({int port = defaultPrincipalPort}) async {
-    final interfaces = await NetworkInterface.list(
-      type: InternetAddressType.IPv4,
-      includeLoopback: false,
-    );
-
-    final prefixes = <String>{};
-    final ownAddresses = <String>{};
-    for (final iface in interfaces) {
-      for (final address in iface.addresses) {
-        final ip = address.address.trim();
-        ownAddresses.add(ip);
-        final p = ip.split('.');
-        if (p.length != 4) continue;
-        final a = int.tryParse(p[0]) ?? -1;
-        final b = int.tryParse(p[1]) ?? -1;
-        final isPrivate = a == 10 ||
-            (a == 192 && b == 168) ||
-            (a == 172 && b >= 16 && b <= 31);
-        if (!isPrivate) continue;
-        prefixes.add('${p[0]}.${p[1]}.${p[2]}');
-      }
-    }
-    if (prefixes.isEmpty) return null;
-
-    final ordered = <String>[];
-    const priority = [1, 2, 10, 20, 30, 50, 100, 150, 200, 254];
-    for (final prefix in prefixes) {
-      for (final n in priority) {
-        final host = '$prefix.$n';
-        if (!ownAddresses.contains(host)) ordered.add(host);
-      }
-      for (var n = 1; n <= 254; n++) {
-        if (priority.contains(n)) continue;
-        final host = '$prefix.$n';
-        if (!ownAddresses.contains(host)) ordered.add(host);
-      }
-    }
-
-    const batchSize = 24;
-    for (var start = 0; start < ordered.length; start += batchSize) {
-      final end = (start + batchSize < ordered.length) ? start + batchSize : ordered.length;
-      final batch = ordered.sublist(start, end);
-      final results = await Future.wait(batch.map((host) => _probeHost(host, port)));
-      for (final host in results) {
-        if (host != null) return host;
-      }
-    }
-    return null;
-  }
-
-  Future<PrincipalConfig> discoverByCode(String rawCode, {PrincipalConfig? previous}) async {
+  Future<PrincipalConfig> pairAddress(String rawHost, String rawCode, {required String deviceId}) async {
+    final host = rawHost.trim().replaceAll(RegExp(r'^https?://'), '').split('/').first.split(':').first;
     final code = rawCode.trim();
+    if (host.isEmpty) {
+      throw PrincipalApiException('Saisissez l’adresse du PC Principal affichée dans GESTCOURS.');
+    }
     if (!RegExp(r'^\d{6}$').hasMatch(code)) {
       throw PrincipalApiException('Saisissez le code professeur à 6 chiffres.');
     }
-
-    if (previous != null && previous.host.trim().isNotEmpty) {
-      final direct = await _pairHost(
-        previous.host.trim(),
-        code,
-        port: previous.port > 0 ? previous.port : defaultPrincipalPort,
-        timeout: const Duration(milliseconds: 900),
-      );
-      if (direct != null) return direct;
-    }
-
-    final udp = await _discoverUdp(code);
-    if (udp != null) return udp;
-
-    final interfaces = await NetworkInterface.list(
-      type: InternetAddressType.IPv4,
-      includeLoopback: false,
-      includeLinkLocal: false,
-    );
-    final hosts = <String>{};
-    for (final iface in interfaces) {
-      for (final address in iface.addresses) {
-        final ip = address.address.trim();
-        if (ip.startsWith('169.254.')) continue;
-        final p = ip.split('.');
-        if (p.length != 4) continue;
-        final a = int.tryParse(p[0]);
-        final b = int.tryParse(p[1]);
-        final c = int.tryParse(p[2]);
-        if (a == null || b == null || c == null) continue;
-        for (var n = 1; n <= 254; n++) {
-          hosts.add('$a.$b.$c.$n');
-        }
-      }
-    }
-    if (hosts.isEmpty) {
+    final found = await _pairHost(host, code, deviceId: deviceId, port: defaultPort, pairTimeout: const Duration(seconds: 3));
+    if (found == null) {
       throw PrincipalApiException(
-        'Aucun réseau local détecté. Connectez le téléphone au même Wi-Fi que le PC Principal.',
+        'Connexion impossible à $host:$defaultPort. Vérifiez l’adresse affichée dans le Principal, le même Wi-Fi/réseau, le code professeur et l’autorisation Windows.',
       );
     }
-
-    final list = hosts.toList(growable: false);
-    const batchSize = 48;
-    for (var start = 0; start < list.length; start += batchSize) {
-      final end = (start + batchSize < list.length) ? start + batchSize : list.length;
-      final results = await Future.wait(
-        list.sublist(start, end).map((host) => _pairHost(host, code)),
-        eagerError: false,
-      );
-      for (final found in results) {
-        if (found != null) return found;
-      }
-    }
-
-    throw PrincipalApiException(
-      'GESTCOURS Principal introuvable. Vérifiez que le PC Principal est ouvert, sur le même Wi-Fi/réseau et que Windows a autorisé le réseau enseignants.',
-    );
+    return found;
   }
 
-
-  Future<Map<String, dynamic>?> _referenceData(PrincipalConfig c) async {
+  Future<Map<String, dynamic>?> _referenceData(PrincipalConfig c, String deviceId) async {
     try {
       final r = await http.get(
-        _uri(c, '/api/v1/reference-data', {'teacher': c.teacher, 'code': c.code}),
-        headers: {'Accept': 'application/json', 'User-Agent': 'GESTCOURS-Prof-Mobile/0.5.4'},
+        _uri(c, '/api/v1/reference-data', _authQuery(c, deviceId)),
+        headers: {'Accept': 'application/json', 'User-Agent': 'GESTCOURS-Prof-Mobile/$mobileVersion'},
       ).timeout(timeout);
       if (r.statusCode < 200 || r.statusCode >= 300 || r.bodyBytes.isEmpty) return null;
       final decoded = jsonDecode(utf8.decode(r.bodyBytes));
@@ -272,32 +118,34 @@ class PrincipalApi {
     }
   }
 
-  Future<SyncSnapshot> sync(PrincipalConfig c) async {
+  Future<SyncSnapshot> sync(PrincipalConfig c, {required String deviceId}) async {
     final r = await http.get(
-      _uri(c, '/api/v1/sync', {'teacher': c.teacher, 'code': c.code}),
-      headers: {'Accept': 'application/json', 'User-Agent': 'GESTCOURS-Prof-Mobile/0.5.4'},
+      _uri(c, '/api/v1/sync', _authQuery(c, deviceId)),
+      headers: {'Accept': 'application/json', 'User-Agent': 'GESTCOURS-Prof-Mobile/$mobileVersion'},
     ).timeout(timeout);
 
-    if (r.statusCode == 403) {
-      throw PrincipalApiException('PC Principal trouvé, mais le professeur ou le code est refusé.');
-    }
     if (r.statusCode < 200 || r.statusCode >= 300) {
-      throw PrincipalApiException('Synchronisation refusée (${r.statusCode}).');
+      final detail = utf8.decode(r.bodyBytes).trim();
+      if (r.statusCode == 403 && detail.toLowerCase().contains('appareil')) {
+        throw PrincipalApiException('Appareil non autorisé ou désactivé par le Principal.');
+      }
+      if (r.statusCode == 403) {
+        throw PrincipalApiException('Code professeur refusé ou accès désactivé par le Principal.');
+      }
+      throw PrincipalApiException('Synchronisation refusée (${r.statusCode})${detail.isEmpty ? '' : ' : $detail'}');
     }
     final decoded = jsonDecode(utf8.decode(r.bodyBytes));
     if (decoded is! Map) throw PrincipalApiException('Réponse de synchronisation invalide.');
     var snapshot = SyncSnapshot.fromJson(Map<String, dynamic>.from(decoded));
     if (snapshot.protocolVersion != 0 && snapshot.protocolVersion != supportedProtocol) {
-      throw PrincipalApiException(
-        'Version de protocole incompatible : Principal ${snapshot.protocolVersion}, mobile $supportedProtocol.',
-      );
+      throw PrincipalApiException('Version de protocole incompatible : Principal ${snapshot.protocolVersion}, mobile $supportedProtocol.');
     }
-    final references = await _referenceData(c);
+    final references = await _referenceData(c, deviceId);
     if (references != null && references.isNotEmpty) snapshot = snapshot.mergeReferenceData(references);
     return snapshot;
   }
 
-  Future<Map<String, dynamic>> sendEvents(PrincipalConfig c, List<TeacherEvent> events) async {
+  Future<Map<String, dynamic>> sendEvents(PrincipalConfig c, List<TeacherEvent> events, {required String deviceId}) async {
     if (events.isEmpty) return {'received': 0, 'acknowledgedIds': <String>[]};
     final body = {
       'protocolVersion': supportedProtocol,
@@ -305,17 +153,52 @@ class PrincipalApi {
       'events': events.map((e) => e.toProtocolV6Json()).toList(),
     };
     final r = await http.post(
-      _uri(c, '/api/v1/events', {'teacher': c.teacher, 'code': c.code}),
-      headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
+      _uri(c, '/api/v1/events', _authQuery(c, deviceId)),
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'User-Agent': 'GESTCOURS-Prof-Mobile/$mobileVersion',
+      },
       body: jsonEncode(body),
     ).timeout(timeout);
     if (r.statusCode < 200 || r.statusCode >= 300) {
-      throw PrincipalApiException(
-        'Transmission refusée (${r.statusCode}) : ${utf8.decode(r.bodyBytes).trim()}',
-      );
+      final detail = utf8.decode(r.bodyBytes).trim();
+      if (r.statusCode == 403 && detail.toLowerCase().contains('appareil')) {
+        throw PrincipalApiException('Transmission bloquée : appareil non autorisé ou désactivé par le Principal.');
+      }
+      throw PrincipalApiException('Transmission refusée (${r.statusCode})${detail.isEmpty ? '' : ' : $detail'}');
     }
     if (r.bodyBytes.isEmpty) return {'received': events.length};
     final decoded = jsonDecode(utf8.decode(r.bodyBytes));
     return decoded is Map ? Map<String, dynamic>.from(decoded) : {'received': events.length};
+  }
+
+  Future<Map<String, Map<String, String>>> eventStatuses(
+    PrincipalConfig c,
+    List<String> ids, {
+    required String deviceId,
+  }) async {
+    if (ids.isEmpty) return const {};
+    final limited = ids.where((e) => e.trim().isNotEmpty).take(100).toList();
+    if (limited.isEmpty) return const {};
+    final r = await http.get(
+      _uri(c, '/api/v1/event-status', _authQuery(c, deviceId, extra: {'ids': limited.join(',')})),
+      headers: {'Accept': 'application/json', 'User-Agent': 'GESTCOURS-Prof-Mobile/$mobileVersion'},
+    ).timeout(timeout);
+    if (r.statusCode < 200 || r.statusCode >= 300 || r.bodyBytes.isEmpty) return const {};
+    final decoded = jsonDecode(utf8.decode(r.bodyBytes));
+    if (decoded is! Map || decoded['items'] is! List) return const {};
+    final out = <String, Map<String, String>>{};
+    for (final raw in decoded['items'] as List) {
+      if (raw is! Map) continue;
+      final item = Map<String, dynamic>.from(raw);
+      final id = (item['id'] ?? '').toString().trim();
+      if (id.isEmpty) continue;
+      out[id] = {
+        'status': (item['status'] ?? 'received').toString(),
+        'reviewNote': (item['reviewNote'] ?? '').toString(),
+      };
+    }
+    return out;
   }
 }
