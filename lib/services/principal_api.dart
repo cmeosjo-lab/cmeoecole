@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:http/http.dart' as http;
@@ -77,6 +78,70 @@ class PrincipalApi {
   }
 
 
+
+  Future<PrincipalConfig?> _discoverUdp(String code) async {
+    RawDatagramSocket? socket;
+    StreamSubscription<RawSocketEvent>? sub;
+    Timer? timer;
+    final completer = Completer<PrincipalConfig?>();
+    try {
+      socket = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
+      socket.broadcastEnabled = true;
+      final targets = <String>{'255.255.255.255'};
+      final interfaces = await NetworkInterface.list(
+        type: InternetAddressType.IPv4,
+        includeLoopback: false,
+        includeLinkLocal: false,
+      );
+      for (final interface in interfaces) {
+        for (final address in interface.addresses) {
+          final parts = address.address.split('.');
+          if (parts.length == 4) {
+            targets.add('${parts[0]}.${parts[1]}.${parts[2]}.255');
+          }
+        }
+      }
+      sub = socket.listen((event) {
+        if (event != RawSocketEvent.read || completer.isCompleted) return;
+        final datagram = socket?.receive();
+        if (datagram == null) return;
+        try {
+          final decoded = jsonDecode(utf8.decode(datagram.data));
+          if (decoded is! Map) return;
+          final data = Map<String, dynamic>.from(decoded);
+          if (data['ok'] != true) return;
+          final protocol = int.tryParse((data['protocolVersion'] ?? '0').toString()) ?? 0;
+          final teacher = (data['teacher'] ?? '').toString().trim();
+          var port = int.tryParse((data['port'] ?? '$defaultPrincipalPort').toString()) ?? defaultPrincipalPort;
+          if (protocol != supportedProtocol || teacher.isEmpty) return;
+          if (port <= 0) port = defaultPrincipalPort;
+          completer.complete(PrincipalConfig(
+            host: datagram.address.address,
+            port: port,
+            teacher: teacher,
+            code: code,
+          ));
+        } catch (_) {}
+      });
+      final payload = utf8.encode('GESTCOURS_DISCOVER_V6|$code');
+      for (final host in targets) {
+        try {
+          socket.send(payload, InternetAddress(host), 47832);
+        } catch (_) {}
+      }
+      timer = Timer(const Duration(milliseconds: 2800), () {
+        if (!completer.isCompleted) completer.complete(null);
+      });
+      return await completer.future;
+    } catch (_) {
+      return null;
+    } finally {
+      timer?.cancel();
+      await sub?.cancel();
+      socket?.close();
+    }
+  }
+
   Future<String?> discoverPrincipal({int port = defaultPrincipalPort}) async {
     final interfaces = await NetworkInterface.list(
       type: InternetAddressType.IPv4,
@@ -144,6 +209,9 @@ class PrincipalApi {
       if (direct != null) return direct;
     }
 
+    final udp = await _discoverUdp(code);
+    if (udp != null) return udp;
+
     final interfaces = await NetworkInterface.list(
       type: InternetAddressType.IPv4,
       includeLoopback: false,
@@ -194,7 +262,7 @@ class PrincipalApi {
     try {
       final r = await http.get(
         _uri(c, '/api/v1/reference-data', {'teacher': c.teacher, 'code': c.code}),
-        headers: {'Accept': 'application/json', 'User-Agent': 'GESTCOURS-Prof-Mobile/0.5.3'},
+        headers: {'Accept': 'application/json', 'User-Agent': 'GESTCOURS-Prof-Mobile/0.5.4'},
       ).timeout(timeout);
       if (r.statusCode < 200 || r.statusCode >= 300 || r.bodyBytes.isEmpty) return null;
       final decoded = jsonDecode(utf8.decode(r.bodyBytes));
@@ -207,7 +275,7 @@ class PrincipalApi {
   Future<SyncSnapshot> sync(PrincipalConfig c) async {
     final r = await http.get(
       _uri(c, '/api/v1/sync', {'teacher': c.teacher, 'code': c.code}),
-      headers: {'Accept': 'application/json', 'User-Agent': 'GESTCOURS-Prof-Mobile/0.5.3'},
+      headers: {'Accept': 'application/json', 'User-Agent': 'GESTCOURS-Prof-Mobile/0.5.4'},
     ).timeout(timeout);
 
     if (r.statusCode == 403) {
