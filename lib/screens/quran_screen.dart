@@ -42,33 +42,40 @@ class _QuranScreenState extends State<QuranScreen> {
     return '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year.toString().padLeft(4, '0')}';
   }
 
+  bool saving = false;
   Future<void> save() async {
-    if (hizb == null && juz == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Le Principal V1.6.7 accepte la validation d’un Hizb ou d’un Juz. Choisir l’un des deux.'),
-      ));
+    if (saving) return;
+    if (surah == null && hizb == null && juz == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Choisir une sourate, un Hizb ou un Juz.')));
       return;
     }
-    final chosen = hizb ?? juz!;
-    final kind = hizb != null ? 'Hizb' : 'Juz';
-    final deviceId = await widget.store.getOrCreateDeviceId();
-    final event = TeacherEvent.create(
-      type: 'quran_validation',
-      teacher: widget.config.teacher,
-      studentId: widget.student.id,
-      classId: widget.student.classId,
-      deviceId: deviceId,
-      payload: {
-        'date': _today(),
-        'kind': kind,
-        'number': chosen.number,
-        if (note.text.trim().isNotEmpty) 'note': note.text.trim(),
-      },
-    );
-    await widget.store.enqueue(event);
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Validation $kind enregistrée. Synchroniser pour l’envoyer au Principal.')));
-    Navigator.pop(context, true);
+    if (surah != null && (verseFrom == null || verseTo == null || verseTo! < verseFrom!)) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Indiquer les versets appris, de … à ….')));
+      return;
+    }
+    setState(() => saving = true);
+    try {
+      final deviceId = await widget.store.getOrCreateDeviceId();
+      final events = <TeacherEvent>[];
+      if (surah != null) {
+        events.add(TeacherEvent.create(type: 'quran_progress', teacher: widget.config.teacher,
+          studentId: widget.student.id, classId: widget.student.classId, deviceId: deviceId,
+          payload: {'date': _today(), 'surahNumber': surah!.number, 'verseFrom': verseFrom,
+            'verseTo': verseTo, 'mode': 'Mémorisation', 'note': note.text.trim()}));
+      }
+      final chosen = hizb ?? juz;
+      if (chosen != null) {
+        events.add(TeacherEvent.create(type: 'quran_validation', teacher: widget.config.teacher,
+          studentId: widget.student.id, classId: widget.student.classId, deviceId: deviceId,
+          payload: {'date': _today(), 'kind': hizb != null ? 'Hizb' : 'Juz', 'number': chosen.number, 'note': note.text.trim()}));
+      }
+      await widget.store.enqueueAll(events);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Suivi Coran enregistré. Il sera transmis pour validation au Principal.')));
+      Navigator.pop(context, true);
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
+    } finally { if (mounted) setState(() => saving = false); }
   }
 
   @override
@@ -91,13 +98,13 @@ class _QuranScreenState extends State<QuranScreen> {
                 color: Theme.of(context).colorScheme.secondaryContainer,
                 borderRadius: BorderRadius.circular(12),
               ),
-              child: const Text('Compatibilité V1.6.7 : la validation synchronisée concerne Hizb/Juz. Les rideaux Sourate/versets sont conservés à l’écran pour la future extension du Principal.'),
+              child: const Text('Les versets appris et les validations Hizb/Juz sont transmis au Principal. Les données officielles sont mises à jour après sa validation.'),
             ),
             const SizedBox(height: 16),
             DropdownButtonFormField<ReferenceItem>(
               value: surah,
               isExpanded: true,
-              decoration: const InputDecoration(labelText: 'Sourate (affichage / future extension)'),
+              decoration: const InputDecoration(labelText: 'Sourate apprise'),
               items: ref.surahs.map((e) => DropdownMenuItem(value: e, child: Text(e.displayLabel, overflow: TextOverflow.ellipsis))).toList(),
               onChanged: ref.surahs.isEmpty ? null : onSurah,
             ),
@@ -153,7 +160,7 @@ class _QuranScreenState extends State<QuranScreen> {
             const SizedBox(height: 12),
             TextField(controller: note, maxLines: 3, decoration: const InputDecoration(labelText: 'Remarque facultative')),
             const SizedBox(height: 22),
-            FilledButton.icon(onPressed: save, icon: const Icon(Icons.save_outlined), label: const Text('Enregistrer la validation')),
+            FilledButton.icon(onPressed: saving ? null : save, icon: const Icon(Icons.save_outlined), label: const Text('Enregistrer le suivi')),
           ],
         ),
       ),

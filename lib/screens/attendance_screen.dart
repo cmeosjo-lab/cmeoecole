@@ -1,3 +1,4 @@
+import '../widgets/save_guard.dart';
 import 'package:flutter/material.dart';
 import '../models/principal_config.dart';
 import '../models/school_data.dart';
@@ -15,7 +16,7 @@ class AttendanceScreen extends StatefulWidget {
   State<AttendanceScreen> createState() => _AttendanceScreenState();
 }
 
-class _AttendanceScreenState extends State<AttendanceScreen> {
+class _AttendanceScreenState extends State<AttendanceScreen> with SaveGuard<AttendanceScreen> {
   String kind = 'absence';
   bool justified = false;
   DateTime date = DateTime.now();
@@ -40,7 +41,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     if (value != null) setState(() => arrival = value);
   }
 
-  Future<void> save() async {
+  Future<void> save() => runSave(() async {
     if (kind == 'retard' && arrival == null) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Indiquer l’heure d’arrivée pour un retard.')));
       return;
@@ -64,7 +65,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Saisie conservée localement jusqu’à synchronisation.')));
     Navigator.pop(context, true);
-  }
+  });
 
   @override
   Widget build(BuildContext context) => Scaffold(
@@ -131,7 +132,7 @@ class _AttendanceScreenState extends State<AttendanceScreen> {
             const SizedBox(height: 12),
             TextField(controller: note, decoration: const InputDecoration(labelText: 'Justification / remarque'), maxLines: 3),
             const SizedBox(height: 22),
-            FilledButton.icon(onPressed: save, icon: const Icon(Icons.save_outlined), label: const Text('Enregistrer')),
+            FilledButton.icon(onPressed: saving ? null : save, icon: const Icon(Icons.save_outlined), label: const Text('Enregistrer')),
           ]),
         ),
       );

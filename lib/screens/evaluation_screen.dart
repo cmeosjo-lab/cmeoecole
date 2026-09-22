@@ -1,3 +1,4 @@
+import '../widgets/save_guard.dart';
 import 'package:flutter/material.dart';
 import '../models/principal_config.dart';
 import '../models/school_data.dart';
@@ -22,7 +23,7 @@ class EvaluationScreen extends StatefulWidget {
   State<EvaluationScreen> createState() => _EvaluationScreenState();
 }
 
-class _EvaluationScreenState extends State<EvaluationScreen> {
+class _EvaluationScreenState extends State<EvaluationScreen> with SaveGuard<EvaluationScreen> {
   DateTime date = DateTime.now();
   String? periodId;
   int? tajwidLevel;
@@ -73,7 +74,7 @@ class _EvaluationScreenState extends State<EvaluationScreen> {
     if (value != null) setState(() => date = value);
   }
 
-  Future<void> save() async {
+  Future<void> save() => runSave(() async {
     final scores = <String, double?>{
       'quran': _score(quran),
       'arabic': _score(arabic),
@@ -133,7 +134,7 @@ class _EvaluationScreenState extends State<EvaluationScreen> {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Évaluation enregistrée. Synchroniser pour l’envoyer au Principal.')));
     Navigator.pop(context, true);
-  }
+  });
 
   Widget scoreField(String label, TextEditingController controller) => TextField(
         controller: controller,
@@ -193,7 +194,7 @@ class _EvaluationScreenState extends State<EvaluationScreen> {
               const SizedBox(height: 10),
               TextField(controller: appreciation, maxLines: 3, decoration: const InputDecoration(labelText: 'Appréciation facultative')),
               const SizedBox(height: 22),
-              FilledButton.icon(onPressed: save, icon: const Icon(Icons.save_outlined), label: const Text('Enregistrer l’évaluation')),
+              FilledButton.icon(onPressed: saving ? null : save, icon: const Icon(Icons.save_outlined), label: const Text('Enregistrer l’évaluation')),
             ],
           ),
         ),

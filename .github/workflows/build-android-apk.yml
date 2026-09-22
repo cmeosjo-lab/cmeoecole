@@ -1,91 +1,70 @@
-name: Construire APK Android
-
+name: Construire et tester GESTCOURS Android
 on:
   workflow_dispatch:
   push:
-    branches: [ main ]
-
+    branches: [main, gestcours-v0.5.5-stabilisation]
 permissions:
   contents: read
-
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   android-apk:
     runs-on: ubuntu-latest
+    timeout-minutes: 35
     env:
+      FLUTTER_SUPPRESS_ANALYTICS: 'true'
+      DART_SUPPRESS_ANALYTICS: 'true'
       STABLE_KEYSTORE_B64: ${{ secrets.GESTCOURS_DEBUG_KEYSTORE_B64 }}
-
     steps:
-      - name: Récupérer le projet
-        uses: actions/checkout@v5
-
-      - name: Installer Flutter stable
-        uses: subosito/flutter-action@v2
+      - name: Isoler les adresses de métadonnées cloud
+        run: |
+          sudo iptables -I OUTPUT -d 169.254.169.254/32 -j REJECT
+          sudo iptables -I OUTPUT -d 169.254.170.2/32 -j REJECT
+      - uses: actions/checkout@v5
+      - uses: subosito/flutter-action@v2
         with:
+          flutter-version: '3.47.5'
           channel: stable
           cache: true
-
-      - name: Générer la plateforme Android
-        shell: bash
+      - name: Générer Android
         run: |
           rm -rf android
           flutter create --platforms=android --org fr.ecolegestion --project-name ecole_gestion_prof_mobile .
+          rm -f test/widget_test.dart
           python3 ci/patch_android.py
-
-      - name: Installer les dépendances
-        run: flutter pub get
-
-      - name: Vérifier le vrai code de l'application
-        run: flutter analyze lib --no-fatal-warnings --no-fatal-infos
-
-      - name: Construire l'APK de validation
-        run: flutter build apk --debug
-
-      - name: Préparer l'APK installable de validation
-        shell: bash
+          flutter pub get
+      - name: Analyse et tests de non-régression
         run: |
-          mkdir -p dist
-          cp build/app/outputs/flutter-apk/app-debug.apk dist/GESTCOURS_PROF_ANDROID_V0_5_4_RESEAU_AUTO.apk
-
-      - name: Publier l'APK installable de validation
-        uses: actions/upload-artifact@v4
-        with:
-          name: GESTCOURS_PROF_ANDROID_V0_5_4_RESEAU_AUTO
-          path: dist/GESTCOURS_PROF_ANDROID_V0_5_4_RESEAU_AUTO.apk
-          if-no-files-found: error
-          retention-days: 30
-
-      - name: Restaurer la signature Android stable
+          flutter analyze lib test --no-fatal-infos
+          flutter test test/stability_test.dart --reporter expanded
+      - name: Restaurer la signature existante si disponible
         if: ${{ env.STABLE_KEYSTORE_B64 != '' }}
-        shell: bash
         run: |
           mkdir -p "$HOME/.android"
           printf '%s' "$STABLE_KEYSTORE_B64" | base64 --decode > "$HOME/.android/debug.keystore"
           chmod 600 "$HOME/.android/debug.keystore"
-
-      - name: Recompiler avec la signature stable
-        if: ${{ env.STABLE_KEYSTORE_B64 != '' }}
-        shell: bash
+      - name: Compiler la version release
+        run: flutter build apk --release
+      - name: Préparer les fichiers vérifiables
         run: |
-          flutter clean
-          flutter pub get
-          flutter build apk --debug
-          mkdir -p dist
-          cp build/app/outputs/flutter-apk/app-debug.apk dist/GESTCOURS_PROF_ANDROID_MODERNE_V0_5_4.apk
-
-      - name: Publier l'APK stable
-        if: ${{ env.STABLE_KEYSTORE_B64 != '' }}
-        uses: actions/upload-artifact@v4
+          mkdir -p dist/signing-tools/lib
+          cp build/app/outputs/flutter-apk/app-release.apk dist/GESTCOURS_PROF_ANDROID_V0_5_5.apk
+          cp pubspec.lock dist/pubspec.lock
+          flutter --version > dist/BUILD_VERSION.txt
+          if [ -n "$STABLE_KEYSTORE_B64" ]; then
+            echo 'existing-stable-key' > dist/SIGNATURE.txt
+          else
+            echo 'temporary-key-requires-private-signing' > dist/SIGNATURE.txt
+          fi
+          build_tools_dir=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
+          cp "$build_tools_dir/apksigner" "$build_tools_dir/zipalign" dist/signing-tools/
+          cp "$build_tools_dir/lib/apksigner.jar" dist/signing-tools/lib/
+          "$build_tools_dir/apksigner" verify --verbose --print-certs dist/GESTCOURS_PROF_ANDROID_V0_5_5.apk > dist/APK_CERTIFICATE.txt
+          sha256sum dist/GESTCOURS_PROF_ANDROID_V0_5_5.apk > dist/SHA256.txt
+      - uses: actions/upload-artifact@v4
         with:
-          name: GESTCOURS_PROF_ANDROID_MODERNE_V0_5_4
-          path: dist/GESTCOURS_PROF_ANDROID_MODERNE_V0_5_4.apk
+          name: GESTCOURS_PROF_ANDROID_V0_5_5
+          path: dist/
           if-no-files-found: error
           retention-days: 30
-
-      - name: Signature stable non configurée
-        if: ${{ env.STABLE_KEYSTORE_B64 == '' }}
-        shell: bash
-        run: |
-          echo '### APK V0.5.4 publiée — signature stable absente' >> "$GITHUB_STEP_SUMMARY"
-          echo '' >> "$GITHUB_STEP_SUMMARY"
-          echo 'La connexion teste la dernière adresse connue, puis la découverte UDP locale (47832) et le secours HTTP (47831).' >> "$GITHUB_STEP_SUMMARY"
-          echo 'Ajoutez le secret `GESTCOURS_DEBUG_KEYSTORE_B64` pour publier un APK stable compatible avec les installations existantes.' >> "$GITHUB_STEP_SUMMARY"

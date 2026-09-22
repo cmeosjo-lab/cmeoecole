@@ -1,3 +1,4 @@
+import 'class_followup_screen.dart';
 import 'package:flutter/material.dart';
 import '../models/principal_config.dart';
 import '../models/school_data.dart';
@@ -94,6 +95,9 @@ class ClassStudentsScreen extends StatelessWidget {
                       OutlinedButton.icon(
                         onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => ClassEvaluationScreen(config: config, snapshot: snapshot, schoolClass: schoolClass, students: students, store: store))),
                         icon: const Icon(Icons.grading_outlined), label: const Text('Contrôle / notes')),
+                      OutlinedButton.icon(
+                        onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => ClassFollowUpScreen(config: config, snapshot: snapshot, schoolClass: schoolClass, students: students, store: store))),
+                        icon: const Icon(Icons.checklist), label: const Text('Suivi de classe')),
                       OutlinedButton.icon(
                         onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => HomeworkScreen(config: config, schoolClass: schoolClass, store: store))),
                         icon: const Icon(Icons.assignment_outlined), label: const Text('Devoir')),

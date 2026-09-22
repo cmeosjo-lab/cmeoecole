@@ -1,3 +1,4 @@
+import '../widgets/save_guard.dart';
 import 'package:flutter/material.dart';
 import '../models/principal_config.dart';
 import '../models/school_data.dart';
@@ -14,7 +15,7 @@ class HomeworkScreen extends StatefulWidget {
   State<HomeworkScreen> createState() => _HomeworkScreenState();
 }
 
-class _HomeworkScreenState extends State<HomeworkScreen> {
+class _HomeworkScreenState extends State<HomeworkScreen> with SaveGuard<HomeworkScreen> {
   DateTime date = DateTime.now();
   String subject = 'Arabe';
   final lessonNumbers = TextEditingController();
@@ -23,7 +24,7 @@ class _HomeworkScreenState extends State<HomeworkScreen> {
 
   String _date(DateTime d) => '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
 
-  Future<void> _save() async {
+  Future<void> _save() => runSave(() async {
     if (lessonNumbers.text.trim().isEmpty && exerciseNumbers.text.trim().isEmpty && manualText.text.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Indiquer une leçon, un exercice ou une consigne.')));
       return;
@@ -48,7 +49,7 @@ class _HomeworkScreenState extends State<HomeworkScreen> {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Devoir enregistré. Il sera soumis au Principal pour validation.')));
     Navigator.pop(context, true);
-  }
+  });
 
   @override
   Widget build(BuildContext context) => Scaffold(
@@ -76,7 +77,7 @@ class _HomeworkScreenState extends State<HomeworkScreen> {
         ],
         TextField(controller: manualText, maxLines: 5, decoration: InputDecoration(labelText: subject == 'Coran' ? 'Consigne Coran' : 'Consigne complémentaire')),
         const SizedBox(height: 22),
-        FilledButton.icon(onPressed: _save, icon: const Icon(Icons.send_outlined), label: const Text('Envoyer au Principal pour validation')),
+        FilledButton.icon(onPressed: saving ? null : _save, icon: const Icon(Icons.send_outlined), label: const Text('Envoyer au Principal pour validation')),
       ],
     )),
   );

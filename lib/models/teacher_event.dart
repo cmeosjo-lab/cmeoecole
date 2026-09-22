@@ -12,6 +12,8 @@ class TeacherEvent {
   final DateTime createdAt;
   final Map<String, dynamic> payload;
   final String status;
+  final String reviewNote;
+  final String reviewedAt;
 
   const TeacherEvent({
     required this.id,
@@ -23,6 +25,8 @@ class TeacherEvent {
     required this.createdAt,
     required this.payload,
     this.status = 'pending',
+    this.reviewNote = '',
+    this.reviewedAt = '',
   });
 
   factory TeacherEvent.create({
@@ -54,10 +58,15 @@ class TeacherEvent {
         createdAt: DateTime.tryParse((json['createdAt'] ?? '').toString()) ?? DateTime.now(),
         payload: json['payload'] is Map ? Map<String, dynamic>.from(json['payload']) : <String, dynamic>{},
         status: (json['_mobileStatus'] ?? 'pending').toString(),
+        reviewNote: (json['reviewNote'] ?? '').toString(),
+        reviewedAt: (json['reviewedAt'] ?? '').toString(),
       );
 
-  bool get supportedByPrincipalV167 => const {
+  bool get supportedByPrincipal => const {
         'attendance',
+        'quran_progress',
+        'lesson_followup',
+        'lessonFollowUp',
         'evaluation',
         'communication',
         'quranValidation',
@@ -68,6 +77,7 @@ class TeacherEvent {
       }.contains(type);
 
   String get protocolType {
+    if (type == 'lessonFollowUp') return 'lesson_followup';
     if (type == 'quranValidation') return 'quran_validation';
     if (type == 'annualAppreciation') return 'annual_appreciation';
     return type;
@@ -90,6 +100,13 @@ class TeacherEvent {
     };
 
     switch (protocolType) {
+      case 'quran_progress':
+        result['quranProgress'] = payload;
+        break;
+      case 'lesson_followup':
+        final date = '${createdAt.day.toString().padLeft(2, '0')}/${createdAt.month.toString().padLeft(2, '0')}/${createdAt.year}';
+        result['lessonFollowUp'] = {'date': date, ...payload};
+        break;
       case 'attendance':
         result['attendance'] = payload;
         break;
@@ -124,9 +141,11 @@ class TeacherEvent {
         'createdAt': createdAt.toIso8601String(),
         'payload': payload,
         '_mobileStatus': status,
+        'reviewNote': reviewNote,
+        'reviewedAt': reviewedAt,
       };
 
-  TeacherEvent copyWithStatus(String newStatus) => TeacherEvent(
+  TeacherEvent copyWithStatus(String newStatus, {String? note, String? reviewedAt}) => TeacherEvent(
         id: id,
         type: type,
         teacher: teacher,
@@ -136,5 +155,7 @@ class TeacherEvent {
         createdAt: createdAt,
         payload: payload,
         status: newStatus,
+        reviewNote: note ?? reviewNote,
+        reviewedAt: reviewedAt ?? this.reviewedAt,
       );
 }

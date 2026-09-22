@@ -27,6 +27,8 @@ class PlatformPermissions {
       if (result.isPermanentlyDenied) {
         return const LocalNetworkPermissionResult(mayProceed: false, permanentlyDenied: true, message: 'Accès au réseau local refusé dans les réglages Android.');
       }
+      // Sur Android antérieur à l'application obligatoire de cette permission,
+      // on tente quand même la connexion LAN afin de ne pas bloquer inutilement.
       return const LocalNetworkPermissionResult(mayProceed: true, permanentlyDenied: false, message: 'Connexion locale à tester.');
     } catch (_) {
       return const LocalNetworkPermissionResult(mayProceed: true, permanentlyDenied: false, message: 'Connexion locale à tester.');

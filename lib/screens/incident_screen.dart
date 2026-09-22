@@ -1,3 +1,4 @@
+import '../widgets/save_guard.dart';
 import 'package:flutter/material.dart';
 import '../models/principal_config.dart';
 import '../models/school_data.dart';
@@ -15,7 +16,7 @@ class IncidentScreen extends StatefulWidget {
   State<IncidentScreen> createState() => _IncidentScreenState();
 }
 
-class _IncidentScreenState extends State<IncidentScreen> {
+class _IncidentScreenState extends State<IncidentScreen> with SaveGuard<IncidentScreen> {
   String family = 'Discipline';
   String? nature;
   String? presetRemark;
@@ -113,7 +114,7 @@ class _IncidentScreenState extends State<IncidentScreen> {
     return '$p $e';
   }
 
-  Future<void> save() async {
+  Future<void> save() => runSave(() async {
     if (nature == null || nature!.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Choisir la nature du signalement.')));
       return;
@@ -141,7 +142,7 @@ class _IncidentScreenState extends State<IncidentScreen> {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Signalement enregistré et placé en attente de transmission.')));
     Navigator.pop(context, true);
-  }
+  });
 
   @override
   Widget build(BuildContext context) => Scaffold(
@@ -200,7 +201,7 @@ class _IncidentScreenState extends State<IncidentScreen> {
               const SizedBox(height: 12),
               TextField(controller: extra, maxLines: 4, decoration: const InputDecoration(labelText: 'Complément facultatif')),
               const SizedBox(height: 22),
-              FilledButton.icon(onPressed: save, icon: const Icon(Icons.save_outlined), label: const Text('Enregistrer pour le Principal')),
+              FilledButton.icon(onPressed: saving ? null : save, icon: const Icon(Icons.save_outlined), label: const Text('Enregistrer pour le Principal')),
             ],
           ),
         ),

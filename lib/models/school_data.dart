@@ -21,7 +21,7 @@ class StudentHistoryItem {
       category: pick(['category', 'type', 'source']),
       date: pick(['date', 'createdAt', 'updatedAt']),
       title: pick(['title', 'label', 'subject', 'category', 'type']),
-      details: pick(['details', 'message', 'note', 'appreciation', 'value']),
+      details: pick(['details', 'detail', 'message', 'note', 'appreciation', 'value']),
       raw: json,
     );
   }
@@ -120,8 +120,12 @@ class SyncSnapshot {
     required this.receivedAt,
   });
 
+  Set<String> get supportedEventTypes => raw['supportedEventTypes'] is List
+      ? (raw['supportedEventTypes'] as List).map((e) => e.toString()).toSet()
+      : const {'attendance', 'evaluation', 'communication', 'quran_validation', 'quran_progress', 'homework', 'annual_appreciation'};
+
   int get historyItems => students.fold(0, (total, s) => total + s.history.length);
-  String get displayTitle => schoolTitle.trim().isNotEmpty ? schoolTitle.trim() : (schoolName.trim().isNotEmpty ? schoolName.trim() : 'ÉCOLE GESTION PRO');
+  String get displayTitle => schoolTitle.trim().isNotEmpty ? schoolTitle.trim() : (schoolName.trim().isNotEmpty ? schoolName.trim() : 'GESTCOURS');
 
   factory SyncSnapshot.fromJson(Map<String, dynamic> json) {
     List<Map<String, dynamic>> maps(dynamic value) => value is List ? value.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList() : const [];

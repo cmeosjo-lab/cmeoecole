@@ -19,23 +19,35 @@ class LessonFollowUpScreen extends StatefulWidget {
 class _LessonFollowUpScreenState extends State<LessonFollowUpScreen> {
   String? subject;
   ReferenceItem? lesson;
-  String status = 'fait';
+  String status = 'Fait';
+  bool saving = false;
   final note = TextEditingController();
 
   Future<void> save() async {
+    if (saving) return;
     if (lesson == null) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Choisir une leçon.')));
       return;
     }
+    setState(() => saving = true);
+    try {
     final deviceId = await widget.store.getOrCreateDeviceId();
+    final followUps = lesson!.raw['followUps'];
+    var revision = 0;
+    if (followUps is List) {
+      for (final f in followUps.whereType<Map>()) {
+        if (f['studentId'] == widget.student.id) revision = int.tryParse('${f['revision'] ?? 0}') ?? 0;
+      }
+    }
     final event = TeacherEvent.create(
-      type: 'lessonFollowUp',
+      type: 'lesson_followup',
       teacher: widget.config.teacher,
       studentId: widget.student.id,
       classId: widget.student.classId,
       deviceId: deviceId,
       payload: {
         'lessonId': lesson!.id,
+        'baseRevision': revision,
         'lesson': lesson!.label,
         if (lesson!.number > 0) 'lessonNumber': lesson!.number,
         if (lesson!.subject.isNotEmpty) 'subject': lesson!.subject,
@@ -45,13 +57,16 @@ class _LessonFollowUpScreenState extends State<LessonFollowUpScreen> {
     );
     await widget.store.enqueue(event);
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Suivi de leçon conservé localement. Le Principal V1.6.7 ne prend pas encore ce type en charge.')));
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Suivi enregistré. Synchronisez pour le transmettre au Principal.')));
     Navigator.pop(context, true);
+    } catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString())));
+    } finally { if (mounted) setState(() => saving = false); }
   }
 
   @override
   Widget build(BuildContext context) {
-    final allLessons = widget.snapshot.references.lessons;
+    final allLessons = widget.snapshot.references.lessons.where((l) => l.raw['classId'] == widget.student.classId).toList();
     final subjects = allLessons.map((e) => e.subject.trim()).where((e) => e.isNotEmpty).toSet().toList()..sort();
     final lessons = subject == null || subject!.isEmpty
         ? allLessons
@@ -75,7 +90,7 @@ class _LessonFollowUpScreenState extends State<LessonFollowUpScreen> {
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(color: Theme.of(context).colorScheme.secondaryContainer, borderRadius: BorderRadius.circular(12)),
-            child: const Text('V1.6.7 : le suivi de leçon est conservé sur le téléphone mais n’est pas envoyé au Principal tant que le serveur n’accepte pas ce type d’événement.'),
+            child: const Text('Le suivi est transmis au Principal pour validation. Une modification concurrente est signalée avant remplacement.'),
           ),
           const SizedBox(height: 16),
           if (subjects.isNotEmpty) ...[
@@ -112,18 +127,14 @@ class _LessonFollowUpScreenState extends State<LessonFollowUpScreen> {
           DropdownButtonFormField<String>(
             value: status,
             decoration: const InputDecoration(labelText: 'État de la leçon'),
-            items: const [
-              DropdownMenuItem(value: 'fait', child: Text('Faite / acquise')),
-              DropdownMenuItem(value: 'a_revoir', child: Text('À revoir')),
-              DropdownMenuItem(value: 'non_acquise', child: Text('Non acquise')),
-              DropdownMenuItem(value: 'absent', child: Text('Élève absent')),
-            ],
-            onChanged: (v) => setState(() => status = v ?? 'fait'),
+            items: const ['Fait', 'Non fait', 'Fait partiellement', 'Vérifié', 'Reporté']
+                .map((v) => DropdownMenuItem(value: v, child: Text(v))).toList(),
+            onChanged: (v) => setState(() => status = v ?? 'Fait'),
           ),
           const SizedBox(height: 12),
           TextField(controller: note, maxLines: 3, decoration: const InputDecoration(labelText: 'Observation facultative')),
           const SizedBox(height: 22),
-          FilledButton.icon(onPressed: lessons.isEmpty ? null : save, icon: const Icon(Icons.save_outlined), label: const Text('Enregistrer')),
+          FilledButton.icon(onPressed: lessons.isEmpty || saving ? null : save, icon: const Icon(Icons.save_outlined), label: const Text('Enregistrer')),
         ]),
       ),
     );

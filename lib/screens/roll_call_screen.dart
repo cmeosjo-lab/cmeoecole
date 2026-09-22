@@ -1,3 +1,4 @@
+import '../widgets/save_guard.dart';
 import 'package:flutter/material.dart';
 import '../models/principal_config.dart';
 import '../models/school_data.dart';
@@ -17,7 +18,7 @@ class RollCallScreen extends StatefulWidget {
   State<RollCallScreen> createState() => _RollCallScreenState();
 }
 
-class _RollCallScreenState extends State<RollCallScreen> {
+class _RollCallScreenState extends State<RollCallScreen> with SaveGuard<RollCallScreen> {
   final Map<String, String> status = {};
   final Map<String, bool> justified = {};
   final Map<String, TimeOfDay> arrival = {};
@@ -38,15 +39,16 @@ class _RollCallScreenState extends State<RollCallScreen> {
     if (t != null) setState(() => arrival[s.id] = t);
   }
 
-  Future<void> _save() async {
+  Future<void> _save() => runSave(() async {
     final deviceId = await widget.store.getOrCreateDeviceId();
     var count = 0;
+    final additions = <TeacherEvent>[];
     for (final s in widget.students) {
       final st = _state(s);
       if (st == 'present') continue;
       final isLate = st == 'retard';
       final t = arrival[s.id] ?? TimeOfDay.now();
-      await widget.store.enqueue(TeacherEvent.create(
+      additions.add(TeacherEvent.create(
         type: 'attendance',
         teacher: widget.config.teacher,
         studentId: s.id,
@@ -62,10 +64,11 @@ class _RollCallScreenState extends State<RollCallScreen> {
       ));
       count++;
     }
+    await widget.store.enqueueAll(additions);
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(count == 0 ? 'Tous les élèves sont présents.' : '$count absence/retard enregistré(s) en attente de synchronisation.')));
     Navigator.pop(context, true);
-  }
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -79,7 +82,7 @@ class _RollCallScreenState extends State<RollCallScreen> {
             child: Row(children: [
               Expanded(child: OutlinedButton.icon(onPressed: _pickDate, icon: const Icon(Icons.calendar_month_outlined), label: Text(_date(date)))),
               const SizedBox(width: 8),
-              FilledButton.icon(onPressed: _save, icon: const Icon(Icons.save_outlined), label: const Text('Enregistrer')),
+              FilledButton.icon(onPressed: saving ? null : _save, icon: const Icon(Icons.save_outlined), label: const Text('Enregistrer')),
             ]),
           ),
           const Padding(padding: EdgeInsets.symmetric(horizontal: 12), child: Align(alignment: Alignment.centerLeft, child: Text('Présent par défaut. Modifiez uniquement les absents et retardataires.'))),

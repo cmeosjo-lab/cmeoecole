@@ -22,12 +22,14 @@ class _EcoleGestionProfAppState extends State<EcoleGestionProfApp> {
   final api = const PrincipalApi();
   PrincipalConfig? config;
   bool loaded = false;
+  String? startupError;
 
   @override
   void initState() { super.initState(); init(); }
 
   Future<void> init() async {
-    config = await store.loadConfig();
+    try { config = await store.loadConfig(); }
+    catch (e) { startupError = e.toString(); }
     if (mounted) setState(() => loaded = true);
   }
 
@@ -38,6 +40,8 @@ class _EcoleGestionProfAppState extends State<EcoleGestionProfApp> {
         theme: AppTheme.light(),
         home: !loaded
             ? const Scaffold(body: Center(child: CircularProgressIndicator()))
+            : startupError != null
+                ? Scaffold(appBar: AppBar(title: const Text('GESTCOURS Prof')), body: Center(child: Padding(padding: const EdgeInsets.all(24), child: SelectableText('Données locales illisibles, conservées sans remplacement.\n$startupError'))))
             : config == null
                 ? SetupScreen(store: store, api: api, onConnected: (c) => setState(() => config = c))
                 : HomeScreen(config: config!, store: store, api: api, onDisconnect: () => setState(() => config = null)),

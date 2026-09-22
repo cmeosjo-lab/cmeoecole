@@ -12,52 +12,94 @@ class PrincipalApiException implements Exception {
   @override
   String toString() => message;
 }
-
 class PrincipalApi {
   static const int supportedProtocol = 6;
-  static const int defaultPrincipalPort = 47831;
+  static const int defaultPort = 47831;
   final Duration timeout;
-
-  const PrincipalApi({this.timeout = const Duration(seconds: 8)});
-
+  const PrincipalApi({this.timeout = const Duration(seconds: 20)});
   Uri _uri(PrincipalConfig c, String path, [Map<String, String>? query]) =>
       Uri.parse('${c.baseUrl}$path').replace(queryParameters: query);
-
+  Map<String, String> _auth(PrincipalConfig c, String deviceId) => {
+    'teacher': c.teacher, 'code': c.code,
+    if (deviceId.isNotEmpty) 'deviceId': deviceId,
+    if (deviceId.isNotEmpty) 'deviceName': 'GESTCOURS Android/iOS',
+  };
+  Future<http.Response> _request(Future<http.Response> Function() send) async {
+    try { return await send().timeout(timeout); }
+    on TimeoutException { throw PrincipalApiException('Le Principal ne répond pas dans le délai prévu. Vos saisies sont conservées ; vous pouvez réessayer.'); }
+    on SocketException { throw PrincipalApiException('PC Principal inaccessible. Vérifiez son adresse, le réseau local et son démarrage.'); }
+    on http.ClientException { throw PrincipalApiException('Connexion réseau interrompue. Les saisies non confirmées sont conservées.'); }
+  }
+  Map<String, dynamic> _decode(http.Response r, {bool pairing = false}) {
+    final body = utf8.decode(r.bodyBytes).trim();
+    if (r.statusCode == 403) {
+      if (body.contains('appareil')) {
+        throw PrincipalApiException('Cet appareil doit être autorisé dans Principal > Réseau enseignants > Appareils.');
+      }
+      throw PrincipalApiException(pairing ? 'Le Principal répond, mais le code professeur est refusé.' : 'Accès refusé. Vérifiez le code professeur enregistré.');
+    }
+    if (r.statusCode == 413) throw PrincipalApiException('Le lot dépasse la taille acceptée par le Principal. Les saisies sont conservées.');
+    if (r.statusCode < 200 || r.statusCode >= 300) {
+      throw PrincipalApiException('Réponse du Principal ${r.statusCode} : ${body.length > 300 ? body.substring(0, 300) : body}');
+    }
+    try {
+      final decoded = jsonDecode(body);
+      if (decoded is Map) return Map<String, dynamic>.from(decoded);
+    } on FormatException { /* Retain local events on malformed replies. */ }
+    throw PrincipalApiException('Réponse du Principal illisible. Aucune saisie non confirmée n’a été supprimée.');
+  }
   Future<bool> ping(PrincipalConfig c) async {
     try {
-      final r = await http.get(_uri(c, '/api/v1/ping')).timeout(timeout);
-      if (r.statusCode < 200 || r.statusCode >= 300) return false;
-      if (r.bodyBytes.isEmpty) return true;
-      final decoded = jsonDecode(utf8.decode(r.bodyBytes));
-      if (decoded is Map) {
-        final ok = decoded['ok'];
-        final version = int.tryParse((decoded['protocolVersion'] ?? '0').toString()) ?? 0;
-        return ok == true && (version == 0 || version == supportedProtocol);
-      }
-      return true;
-    } on SocketException {
-      return false;
-    } catch (_) {
-      return false;
+      final d = _decode(await _request(() => http.get(_uri(c, '/api/v1/ping'))));
+      return d['ok'] == true;
+    } catch (_) { return false; }
+  }
+  Future<PrincipalConfig> pairAddress(String rawHost, String rawCode) async {
+    final text = rawHost.trim();
+    final parsed = Uri.tryParse(text.contains('://') ? text : 'http://$text');
+    if (parsed == null || parsed.host.isEmpty || parsed.userInfo.isNotEmpty || (parsed.scheme != 'http' && parsed.scheme != 'https')) {
+      throw PrincipalApiException('Saisissez l’adresse IPv4 du PC Principal, par exemple 192.168.1.20.');
     }
+    final host = parsed.host;
+    final address = InternetAddress.tryParse(host);
+    if (address == null || address.type != InternetAddressType.IPv4 || address.isLoopback || address.address == '0.0.0.0') {
+      throw PrincipalApiException('Recopiez l’adresse IPv4 du Principal. 127.0.0.1 désigne cet appareil, pas le PC Principal.');
+    }
+    final code = rawCode.trim();
+    if (!RegExp(r'^\d{6}$').hasMatch(code)) throw PrincipalApiException('Saisissez le code professeur à 6 chiffres.');
+    final uri = Uri(scheme: 'http', host: host, port: defaultPort, path: '/api/v1/pair', queryParameters: {'code': code});
+    final data = _decode(await _request(() => http.get(uri)), pairing: true);
+    if (data['protocolVersion'] != supportedProtocol) throw PrincipalApiException('Versions incompatibles. Installez le Principal et l’application du même lot.');
+    final teacher = (data['teacher'] ?? '').toString().trim();
+    if (data['ok'] != true || teacher.isEmpty) throw PrincipalApiException('Le Principal n’a pas identifié le professeur.');
+    return PrincipalConfig(host: host, port: int.tryParse('${data['port']}') ?? defaultPort, teacher: teacher, code: code);
   }
-
-  Future<String?> _probeHost(String host, int port) async {
-    try {
-      final uri = Uri.parse('http://$host:$port/api/v1/ping');
-      final r = await http.get(uri).timeout(const Duration(milliseconds: 450));
-      if (r.statusCode != 200 || r.bodyBytes.isEmpty) return null;
-      final decoded = jsonDecode(utf8.decode(r.bodyBytes));
-      if (decoded is! Map) return null;
-      final ok = decoded['ok'] == true;
-      final version = int.tryParse((decoded['protocolVersion'] ?? '0').toString()) ?? 0;
-      if (ok && version == supportedProtocol) return host;
-    } catch (_) {}
-    return null;
+  Future<SyncSnapshot> sync(PrincipalConfig c, {String deviceId = ''}) async {
+    final auth = _auth(c, deviceId);
+    final data = _decode(await _request(() => http.get(_uri(c, '/api/v1/sync', auth))));
+    var snapshot = SyncSnapshot.fromJson(data);
+    if (snapshot.protocolVersion != supportedProtocol) throw PrincipalApiException('Version de protocole incompatible.');
+    final referenceResponse = await _request(() => http.get(_uri(c, '/api/v1/reference-data', auth)));
+    if (referenceResponse.statusCode != 404) {
+      snapshot = snapshot.mergeReferenceData(_decode(referenceResponse));
+    }
+    return snapshot;
   }
-
+  Future<Map<String, dynamic>> sendEvents(PrincipalConfig c, List<TeacherEvent> events, {String deviceId = ''}) async {
+    final body = jsonEncode({'protocolVersion': supportedProtocol, 'events': events.map((e) => e.toProtocolV6Json()).toList()});
+    return _decode(await _request(() => http.post(_uri(c, '/api/v1/events', _auth(c, deviceId)),
+      headers: {'Content-Type': 'application/json', 'Accept': 'application/json'}, body: body)));
+  }
+  Future<List<Map<String, dynamic>>> eventStatuses(PrincipalConfig c, List<String> ids, {String deviceId = ''}) async {
+    if (ids.isEmpty) return [];
+    final r = await _request(() => http.get(_uri(c, '/api/v1/event-status', {..._auth(c, deviceId), 'ids': ids.join(',')})));
+    if (r.statusCode == 404) return [];
+    final data = _decode(r);
+    final items = data['items'] ?? data['events'];
+    return items is List ? items.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList() : [];
+  }
   Future<PrincipalConfig?> _pairHost(String host, String code,
-      {int port = defaultPrincipalPort, Duration timeout = const Duration(milliseconds: 650)}) async {
+      {int port = defaultPort, Duration timeout = const Duration(milliseconds: 650)}) async {
     try {
       final uri = Uri.parse('http://$host:$port/api/v1/pair')
           .replace(queryParameters: {'code': code});
@@ -112,9 +154,9 @@ class PrincipalApi {
           if (data['ok'] != true) return;
           final protocol = int.tryParse((data['protocolVersion'] ?? '0').toString()) ?? 0;
           final teacher = (data['teacher'] ?? '').toString().trim();
-          var port = int.tryParse((data['port'] ?? '$defaultPrincipalPort').toString()) ?? defaultPrincipalPort;
+          var port = int.tryParse((data['port'] ?? '$defaultPort').toString()) ?? defaultPort;
           if (protocol != supportedProtocol || teacher.isEmpty) return;
-          if (port <= 0) port = defaultPrincipalPort;
+          if (port <= 0) port = defaultPort;
           completer.complete(PrincipalConfig(
             host: datagram.address.address,
             port: port,
@@ -142,57 +184,6 @@ class PrincipalApi {
     }
   }
 
-  Future<String?> discoverPrincipal({int port = defaultPrincipalPort}) async {
-    final interfaces = await NetworkInterface.list(
-      type: InternetAddressType.IPv4,
-      includeLoopback: false,
-    );
-
-    final prefixes = <String>{};
-    final ownAddresses = <String>{};
-    for (final iface in interfaces) {
-      for (final address in iface.addresses) {
-        final ip = address.address.trim();
-        ownAddresses.add(ip);
-        final p = ip.split('.');
-        if (p.length != 4) continue;
-        final a = int.tryParse(p[0]) ?? -1;
-        final b = int.tryParse(p[1]) ?? -1;
-        final isPrivate = a == 10 ||
-            (a == 192 && b == 168) ||
-            (a == 172 && b >= 16 && b <= 31);
-        if (!isPrivate) continue;
-        prefixes.add('${p[0]}.${p[1]}.${p[2]}');
-      }
-    }
-    if (prefixes.isEmpty) return null;
-
-    final ordered = <String>[];
-    const priority = [1, 2, 10, 20, 30, 50, 100, 150, 200, 254];
-    for (final prefix in prefixes) {
-      for (final n in priority) {
-        final host = '$prefix.$n';
-        if (!ownAddresses.contains(host)) ordered.add(host);
-      }
-      for (var n = 1; n <= 254; n++) {
-        if (priority.contains(n)) continue;
-        final host = '$prefix.$n';
-        if (!ownAddresses.contains(host)) ordered.add(host);
-      }
-    }
-
-    const batchSize = 24;
-    for (var start = 0; start < ordered.length; start += batchSize) {
-      final end = (start + batchSize < ordered.length) ? start + batchSize : ordered.length;
-      final batch = ordered.sublist(start, end);
-      final results = await Future.wait(batch.map((host) => _probeHost(host, port)));
-      for (final host in results) {
-        if (host != null) return host;
-      }
-    }
-    return null;
-  }
-
   Future<PrincipalConfig> discoverByCode(String rawCode, {PrincipalConfig? previous}) async {
     final code = rawCode.trim();
     if (!RegExp(r'^\d{6}$').hasMatch(code)) {
@@ -203,7 +194,7 @@ class PrincipalApi {
       final direct = await _pairHost(
         previous.host.trim(),
         code,
-        port: previous.port > 0 ? previous.port : defaultPrincipalPort,
+        port: previous.port > 0 ? previous.port : defaultPort,
         timeout: const Duration(milliseconds: 900),
       );
       if (direct != null) return direct;
@@ -228,6 +219,7 @@ class PrincipalApi {
         final b = int.tryParse(p[1]);
         final c = int.tryParse(p[2]);
         if (a == null || b == null || c == null) continue;
+        if (!(a == 10 || (a == 192 && b == 168) || (a == 172 && b >= 16 && b <= 31))) continue;
         for (var n = 1; n <= 254; n++) {
           hosts.add('$a.$b.$c.$n');
         }
@@ -258,64 +250,4 @@ class PrincipalApi {
   }
 
 
-  Future<Map<String, dynamic>?> _referenceData(PrincipalConfig c) async {
-    try {
-      final r = await http.get(
-        _uri(c, '/api/v1/reference-data', {'teacher': c.teacher, 'code': c.code}),
-        headers: {'Accept': 'application/json', 'User-Agent': 'GESTCOURS-Prof-Mobile/0.5.4'},
-      ).timeout(timeout);
-      if (r.statusCode < 200 || r.statusCode >= 300 || r.bodyBytes.isEmpty) return null;
-      final decoded = jsonDecode(utf8.decode(r.bodyBytes));
-      return decoded is Map ? Map<String, dynamic>.from(decoded) : null;
-    } catch (_) {
-      return null;
-    }
-  }
-
-  Future<SyncSnapshot> sync(PrincipalConfig c) async {
-    final r = await http.get(
-      _uri(c, '/api/v1/sync', {'teacher': c.teacher, 'code': c.code}),
-      headers: {'Accept': 'application/json', 'User-Agent': 'GESTCOURS-Prof-Mobile/0.5.4'},
-    ).timeout(timeout);
-
-    if (r.statusCode == 403) {
-      throw PrincipalApiException('PC Principal trouvé, mais le professeur ou le code est refusé.');
-    }
-    if (r.statusCode < 200 || r.statusCode >= 300) {
-      throw PrincipalApiException('Synchronisation refusée (${r.statusCode}).');
-    }
-    final decoded = jsonDecode(utf8.decode(r.bodyBytes));
-    if (decoded is! Map) throw PrincipalApiException('Réponse de synchronisation invalide.');
-    var snapshot = SyncSnapshot.fromJson(Map<String, dynamic>.from(decoded));
-    if (snapshot.protocolVersion != 0 && snapshot.protocolVersion != supportedProtocol) {
-      throw PrincipalApiException(
-        'Version de protocole incompatible : Principal ${snapshot.protocolVersion}, mobile $supportedProtocol.',
-      );
-    }
-    final references = await _referenceData(c);
-    if (references != null && references.isNotEmpty) snapshot = snapshot.mergeReferenceData(references);
-    return snapshot;
-  }
-
-  Future<Map<String, dynamic>> sendEvents(PrincipalConfig c, List<TeacherEvent> events) async {
-    if (events.isEmpty) return {'received': 0, 'acknowledgedIds': <String>[]};
-    final body = {
-      'protocolVersion': supportedProtocol,
-      'teacher': c.teacher,
-      'events': events.map((e) => e.toProtocolV6Json()).toList(),
-    };
-    final r = await http.post(
-      _uri(c, '/api/v1/events', {'teacher': c.teacher, 'code': c.code}),
-      headers: {'Content-Type': 'application/json', 'Accept': 'application/json'},
-      body: jsonEncode(body),
-    ).timeout(timeout);
-    if (r.statusCode < 200 || r.statusCode >= 300) {
-      throw PrincipalApiException(
-        'Transmission refusée (${r.statusCode}) : ${utf8.decode(r.bodyBytes).trim()}',
-      );
-    }
-    if (r.bodyBytes.isEmpty) return {'received': events.length};
-    final decoded = jsonDecode(utf8.decode(r.bodyBytes));
-    return decoded is Map ? Map<String, dynamic>.from(decoded) : {'received': events.length};
-  }
 }

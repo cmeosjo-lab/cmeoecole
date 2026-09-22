@@ -1,3 +1,4 @@
+import '../widgets/save_guard.dart';
 import 'package:flutter/material.dart';
 import '../models/principal_config.dart';
 import '../models/school_data.dart';
@@ -14,7 +15,7 @@ class ClassEvaluationScreen extends StatefulWidget {
   @override State<ClassEvaluationScreen> createState() => _ClassEvaluationScreenState();
 }
 
-class _ClassEvaluationScreenState extends State<ClassEvaluationScreen> {
+class _ClassEvaluationScreenState extends State<ClassEvaluationScreen> with SaveGuard<ClassEvaluationScreen> {
   DateTime date = DateTime.now();
   String subject = 'Arabe';
   final title = TextEditingController();
@@ -24,15 +25,19 @@ class _ClassEvaluationScreenState extends State<ClassEvaluationScreen> {
   String _date(DateTime d) => '${d.day.toString().padLeft(2,'0')}/${d.month.toString().padLeft(2,'0')}/${d.year}';
   String _keyForSubject() => {'Coran':'quran','Arabe':'arabic','Aqida':'aqida','Fiqh':'fiqh','Sira':'sira'}[subject] ?? 'arabic';
 
-  Future<void> _save() async {
+  Future<void> _save() => runSave(() async {
     if (title.text.trim().isEmpty) { ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Indiquer le nom du contrôle.'))); return; }
     final deviceId = await widget.store.getOrCreateDeviceId();
     var count = 0;
+    final additions = <TeacherEvent>[];
     for (final s in widget.students) {
       final st = scoreStatus[s.id] ?? '';
       final txt = scores[s.id]?.text.trim().replaceAll(',', '.') ?? '';
       final value = double.tryParse(txt);
-      if (st.isEmpty && value == null) continue;
+      if (st.isEmpty && txt.isEmpty) continue;
+      if (txt.isNotEmpty && (value == null || !value.isFinite)) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Note illisible pour ${s.displayName}.'))); return;
+      }
       if (value != null && (value < 0 || value > widget.snapshot.evaluationMax)) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Note invalide pour ${s.displayName}.'))); return;
       }
@@ -43,13 +48,14 @@ class _ClassEvaluationScreenState extends State<ClassEvaluationScreen> {
         if (st.isNotEmpty) 'scoreStatus': st,
         if (value != null) _keyForSubject(): value,
       };
-      await widget.store.enqueue(TeacherEvent.create(type:'evaluation', teacher:widget.config.teacher, studentId:s.id, classId:widget.schoolClass.id, deviceId:deviceId, payload:payload));
+      additions.add(TeacherEvent.create(type:'evaluation', teacher:widget.config.teacher, studentId:s.id, classId:widget.schoolClass.id, deviceId:deviceId, payload:payload));
       count++;
     }
+    await widget.store.enqueueAll(additions);
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$count note(s)/statut(s) enregistré(s). Elles devront être validées par le Principal.')));
     Navigator.pop(context, true);
-  }
+  });
 
   @override Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(title: Text('Contrôle — ${widget.schoolClass.name}')),
@@ -74,7 +80,7 @@ class _ClassEvaluationScreenState extends State<ClassEvaluationScreen> {
           SizedBox(width:120, child:DropdownButtonFormField<String>(value:(scoreStatus[s.id]??'').isEmpty?null:scoreStatus[s.id], hint:const Text('Statut'), items:const ['Absent','Dispensé','Non noté'].map((e)=>DropdownMenuItem(value:e,child:Text(e))).toList(), onChanged:(v)=>setState(()=>scoreStatus[s.id]=v??''))),
         ]);
       })),
-      Padding(padding:EdgeInsets.fromLTRB(12,8,12,16+MediaQuery.of(context).padding.bottom), child:SizedBox(width:double.infinity, child:FilledButton.icon(onPressed:_save, icon:const Icon(Icons.save_outlined), label:const Text('Enregistrer les notes')))),
+      Padding(padding:EdgeInsets.fromLTRB(12,8,12,16+MediaQuery.of(context).padding.bottom), child:SizedBox(width:double.infinity, child:FilledButton.icon(onPressed: saving ? null : _save, icon:const Icon(Icons.save_outlined), label:const Text('Enregistrer les notes')))),
     ])),
   );
 }
