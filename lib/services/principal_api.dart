@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:http/http.dart' as http;
@@ -194,7 +195,7 @@ class PrincipalApi {
     try {
       final r = await http.get(
         _uri(c, '/api/v1/reference-data', {'teacher': c.teacher, 'code': c.code}),
-        headers: {'Accept': 'application/json', 'User-Agent': 'GESTCOURS-Prof-Mobile/0.5.3'},
+        headers: {'Accept': 'application/json', 'User-Agent': 'GESTCOURS-Prof-Mobile/0.5.4'},
       ).timeout(timeout);
       if (r.statusCode < 200 || r.statusCode >= 300 || r.bodyBytes.isEmpty) return null;
       final decoded = jsonDecode(utf8.decode(r.bodyBytes));
@@ -207,7 +208,7 @@ class PrincipalApi {
   Future<SyncSnapshot> sync(PrincipalConfig c) async {
     final r = await http.get(
       _uri(c, '/api/v1/sync', {'teacher': c.teacher, 'code': c.code}),
-      headers: {'Accept': 'application/json', 'User-Agent': 'GESTCOURS-Prof-Mobile/0.5.3'},
+      headers: {'Accept': 'application/json', 'User-Agent': 'GESTCOURS-Prof-Mobile/0.5.4'},
     ).timeout(timeout);
 
     if (r.statusCode == 403) {
