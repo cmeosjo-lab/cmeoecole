@@ -1,0 +1,71 @@
+name: Construire iOS
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - "lib/**"
+      - "pubspec.yaml"
+      - "ci/patch_ios.py"
+      - ".github/workflows/build-ios.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  ios-build:
+    runs-on: macos-15
+
+    steps:
+      - name: Récupérer le projet
+        uses: actions/checkout@v5
+
+      - name: Installer Flutter stable
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Générer la plateforme iOS
+        shell: bash
+        run: |
+          rm -rf ios
+          flutter create --platforms=ios --org fr.ecolegestion --project-name ecole_gestion_prof_mobile .
+          python3 ci/patch_ios.py
+
+      - name: Installer les dépendances
+        run: flutter pub get
+
+      - name: Vérifier le code Flutter
+        run: flutter analyze lib --no-fatal-warnings --no-fatal-infos
+
+      - name: Compiler pour iPhone ARM64 sans signature Apple
+        run: flutter build ios --release --no-codesign
+
+      - name: Vérifier l'application iOS générée
+        shell: bash
+        run: |
+          test -d build/ios/iphoneos/Runner.app
+          /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" build/ios/iphoneos/Runner.app/Info.plist
+          /usr/libexec/PlistBuddy -c "Print :CFBundleVersion" build/ios/iphoneos/Runner.app/Info.plist
+          /usr/libexec/PlistBuddy -c "Print :NSLocalNetworkUsageDescription" build/ios/iphoneos/Runner.app/Info.plist
+          file build/ios/iphoneos/Runner.app/Runner
+          mkdir -p dist
+          ditto -c -k --sequesterRsrc --keepParent             build/ios/iphoneos/Runner.app             dist/GESTCOURS_PROF_IOS_V0_5_6_UNSIGNED_APP.zip
+
+      - name: Publier le build iOS non signé
+        uses: actions/upload-artifact@v4
+        with:
+          name: GESTCOURS_PROF_IOS_V0_5_6_UNSIGNED_APP
+          path: dist/GESTCOURS_PROF_IOS_V0_5_6_UNSIGNED_APP.zip
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Avertissement signature Apple
+        shell: bash
+        run: |
+          echo '### Build iOS V0.5.6 validé sans signature Apple' >> "$GITHUB_STEP_SUMMARY"
+          echo '' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Le .app ARM64 est compilé pour iPhone mais n’est pas installable directement.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Une identité Apple Developer + un provisioning profile sont requis pour produire l’IPA installable.' >> "$GITHUB_STEP_SUMMARY"
