@@ -33,6 +33,10 @@ jobs:
           channel: stable
           cache: true
 
+      - name: Vérifier le script de signature
+        shell: bash
+        run: bash -n ci/sign_ios.sh
+
       - name: Générer la plateforme iOS
         shell: bash
         run: |
