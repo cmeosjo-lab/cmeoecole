@@ -20,7 +20,7 @@ La caméra n'est demandée que si le professeur utilise le scanner QR.
 
 COMPATIBILITÉ
 -------------
-- iOS 13 ou version ultérieure ;
+- iOS 15 ou version ultérieure ;
 - build iPhone ARM64 ;
 - même protocole réseau V6 que l'Android V0.5.6.
 
