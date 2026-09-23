@@ -30,7 +30,7 @@ security set-keychain-settings -lut 21600 "$KEYCHAIN"
 security unlock-keychain -p "$IOS_KEYCHAIN_PASSWORD" "$KEYCHAIN"
 security import "$P12" -k "$KEYCHAIN" -P "$IOS_CERTIFICATE_PASSWORD" -T /usr/bin/codesign -T /usr/bin/security
 security set-key-partition-list -S apple-tool:,apple: -s -k "$IOS_KEYCHAIN_PASSWORD" "$KEYCHAIN"
-security list-keychains -d user -s "$KEYCHAIN" "$(security list-keychains -d user | tr -d '"')"
+security list-keychains -d user -s "$KEYCHAIN"
 
 security cms -D -i "$PROFILE" > "$PROFILE_PLIST"
 PROFILE_NAME=$(/usr/libexec/PlistBuddy -c 'Print :Name' "$PROFILE_PLIST")
