@@ -15,7 +15,7 @@ class PrincipalApiException implements Exception {
 class PrincipalApi {
   static const int supportedProtocol = 6;
   static const int defaultPort = 47831;
-  static const String mobileVersion = '0.5.5';
+  static const String mobileVersion = '0.5.6';
   final Duration timeout;
 
   const PrincipalApi({this.timeout = const Duration(seconds: 8)});
