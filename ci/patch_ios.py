@@ -30,7 +30,7 @@ pbx = Path("ios/Runner.xcodeproj/project.pbxproj")
 if not pbx.exists():
     raise SystemExit("Projet Xcode iOS introuvable")
 text = pbx.read_text(encoding="utf-8")
-text = re.sub(r"IPHONEOS_DEPLOYMENT_TARGET = [^;]+;", "IPHONEOS_DEPLOYMENT_TARGET = 13.0;", text)
+text = re.sub(r"IPHONEOS_DEPLOYMENT_TARGET = [^;]+;", "IPHONEOS_DEPLOYMENT_TARGET = 15.0;", text)
 pbx.write_text(text, encoding="utf-8")
 
-print("iOS configuré : iOS 13+, réseau local, HTTP LAN et caméra QR.")
+print("iOS configuré : iOS 15+, réseau local, HTTP LAN et caméra QR.")
