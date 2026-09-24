@@ -2,10 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../models/principal_config.dart';
 import '../models/school_data.dart';
-import '../models/teacher_event.dart';
 import '../services/local_store.dart';
 import '../services/principal_api.dart';
-import '../services/sync_service.dart';
+import '../services/sync_coordinator.dart';
 import '../widgets/school_header.dart';
 import 'classes_screen.dart';
 
@@ -13,296 +12,542 @@ class HomeScreen extends StatefulWidget {
   final PrincipalConfig config;
   final LocalStore store;
   final PrincipalApi api;
+  final SyncCoordinator coordinator;
   final VoidCallback onDisconnect;
-  const HomeScreen({super.key, required this.config, required this.store, required this.api, required this.onDisconnect});
-
+  const HomeScreen({
+    super.key,
+    required this.config,
+    required this.store,
+    required this.api,
+    required this.coordinator,
+    required this.onDisconnect,
+  });
   @override
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
 class _HomeScreenState extends State<HomeScreen> {
   SyncSnapshot? snapshot;
-  int pending = 0;
-  int receivedCount = 0;
-  int acceptedCount = 0;
-  int refusedCount = 0;
-  bool syncing = false;
-  bool connected = false;
-  String status = 'Chargement…';
-  int lastReceived = 0;
-  int lastConfirmed = 0;
-  int lastRejected = 0;
-  int lastDuplicates = 0;
-  int lastUnsupported = 0;
-
+  PrincipalConfig? actualConfig;
+  DateTime? lastSync;
+  int pending = 0, received = 0, accepted = 0, refused = 0, _generation = 0;
+  String? localError;
   @override
   void initState() {
     super.initState();
-    load();
+    widget.store.addListener(_changed);
+    widget.coordinator.addListener(_changed);
+    _refresh();
   }
 
-  Future<void> _refreshTransmissionCounts() async {
-    final history = await widget.store.loadTransmissionHistory();
-    if (!mounted) return;
-    setState(() {
-      receivedCount = history.where((e) => e.status == 'received' || e.status == 'pending').length;
-      acceptedCount = history.where((e) => e.status == 'accepted').length;
-      refusedCount = history.where((e) => e.status == 'refused').length;
-    });
+  @override
+  void dispose() {
+    widget.store.removeListener(_changed);
+    widget.coordinator.removeListener(_changed);
+    super.dispose();
   }
 
-  Future<void> load() async {
-    final local = await widget.store.loadSnapshot();
-    final queue = await widget.store.loadQueue();
-    if (mounted) setState(() {
-      snapshot = local;
-      pending = queue.length;
-      status = 'Données locales disponibles';
-    });
-    await _refreshTransmissionCounts();
-    await sync();
+  void _changed() {
+    if (mounted) _refresh();
   }
 
-  Future<void> sync() async {
-    if (syncing) return;
-    setState(() => syncing = true);
+  Future<void> _refresh() async {
+    final generation = ++_generation;
     try {
-      final result = await SyncService(widget.store, widget.api).synchronize(widget.config);
-      if (!mounted) return;
+      final config = await widget.store.loadConfig();
+      final s = await widget.store.loadSnapshot();
+      final q = await widget.store.loadQueue();
+      final h = await widget.store.loadTransmissionHistory();
+      final last = await widget.store.lastSuccessfulSync();
+      if (!mounted || generation != _generation) return;
       setState(() {
-        snapshot = result.snapshot;
-        pending = result.remaining;
-        connected = result.connected;
-        status = result.message;
-        lastReceived = result.received;
-        lastConfirmed = result.sent;
-        lastRejected = result.rejected;
-        lastDuplicates = result.duplicates;
-        lastUnsupported = result.unsupported;
+        actualConfig = config;
+        snapshot = s;
+        pending = q.length;
+        lastSync = last;
+        localError = null;
+        received = h.where((e) => e.status == 'received').length;
+        accepted = h.where((e) => e.status == 'accepted').length;
+        refused = h.where((e) => e.status == 'refused').length;
       });
-      await _refreshTransmissionCounts();
     } catch (e) {
-      if (mounted) setState(() {
-        connected = false;
-        status = e.toString();
-      });
-    } finally {
-      if (mounted) setState(() => syncing = false);
+      if (mounted) setState(() => localError = e.toString());
     }
   }
 
-  String _statusLabel(String value) {
-    switch (value) {
-      case 'accepted':
-        return 'Validé';
-      case 'refused':
-        return 'Refusé';
-      case 'received':
-      case 'pending':
-        return 'Reçu par le Principal';
-      default:
-        return value;
-    }
+  Future<void> _sync() async {
+    await widget.coordinator.synchronize();
+    await _refresh();
   }
 
-  IconData _statusIcon(String value) {
-    switch (value) {
-      case 'accepted':
-        return Icons.verified_outlined;
-      case 'refused':
-        return Icons.block_outlined;
-      case 'received':
-      case 'pending':
-        return Icons.mark_email_read_outlined;
-      default:
-        return Icons.outbox_outlined;
-    }
-  }
-
-  Future<void> showTransmissionHistory() async {
-    final queue = await widget.store.loadQueue();
-    final history = await widget.store.loadTransmissionHistory();
-    final items = <TeacherEvent>[
-      ...queue.map((e) => e.copyWithStatus('local_pending')),
-      ...history,
-    ]..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+  String _when(DateTime? d) => d == null
+      ? 'Pas encore effectuée'
+      : '${d.toLocal().day.toString().padLeft(2, '0')}/${d.toLocal().month.toString().padLeft(2, '0')} à ${d.toLocal().hour.toString().padLeft(2, '0')}:${d.toLocal().minute.toString().padLeft(2, '0')}';
+  String _label(String s) =>
+      const {
+        'pending': 'À envoyer',
+        'received': 'Reçu par le Principal',
+        'accepted': 'Validé',
+        'refused': 'Refusé',
+      }[s] ??
+      s;
+  Future<void> _history() async {
+    final q = await widget.store.loadQueue();
+    final h = await widget.store.loadTransmissionHistory();
+    final all = [...q, ...h]
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
     if (!mounted) return;
+    var filter = 'all';
     await showDialog<void>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Suivi des transmissions'),
-        content: SizedBox(
-          width: 820,
-          child: items.isEmpty
-              ? const Text('Aucune saisie enregistrée.')
-              : ListView.separated(
-                  shrinkWrap: true,
-                  itemCount: items.length,
-                  separatorBuilder: (_, __) => const Divider(height: 8),
-                  itemBuilder: (_, i) {
-                    final e = items[i];
-                    final localPending = e.status == 'local_pending';
-                    final label = localPending ? 'À envoyer' : _statusLabel(e.status);
-                    final note = (e.payload['_reviewNote'] ?? '').toString().trim();
-                    return ListTile(
-                      dense: true,
-                      contentPadding: EdgeInsets.zero,
-                      leading: Icon(localPending ? Icons.outbox_outlined : _statusIcon(e.status)),
-                      title: Text('${e.displayType} — $label', style: const TextStyle(fontWeight: FontWeight.w700)),
-                      subtitle: Text([
-                        e.createdAt.toLocal().toString().split('.').first,
-                        if (note.isNotEmpty) 'Motif : $note',
-                      ].join('\n')),
-                    );
-                  },
-                ),
-        ),
-        actions: [FilledButton(onPressed: () => Navigator.pop(context), child: const Text('Fermer'))],
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, update) {
+          final items = all
+              .where((e) => filter == 'all' || e.status == filter)
+              .toList();
+          return AlertDialog(
+            title: const Text('Suivi des saisies'),
+            content: SizedBox(
+              width: 640,
+              height: MediaQuery.sizeOf(context).height * .6,
+              child: Column(
+                children: [
+                  DropdownButton<String>(
+                    value: filter,
+                    isExpanded: true,
+                    items: ['all', 'pending', 'received', 'accepted', 'refused']
+                        .map(
+                          (s) => DropdownMenuItem(
+                            value: s,
+                            child: Text(
+                              s == 'all' ? 'Toutes les saisies' : _label(s),
+                            ),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: (s) => update(() => filter = s ?? 'all'),
+                  ),
+                  Expanded(
+                    child: items.isEmpty
+                        ? const Center(
+                            child: Text('Aucune saisie dans cette catégorie.'),
+                          )
+                        : ListView.builder(
+                            itemCount: items.length,
+                            itemBuilder: (context, i) {
+                              final e = items[i];
+                              final matching = snapshot?.students.where(
+                                (s) => s.id == e.studentId,
+                              );
+                              final student =
+                                  matching != null && matching.isNotEmpty
+                                  ? matching.first.displayName
+                                  : e.studentId.isEmpty
+                                  ? 'Toute la classe'
+                                  : 'Élève archivé';
+                              final note = (e.payload['_reviewNote'] ?? '')
+                                  .toString();
+                              return ListTile(
+                                contentPadding: EdgeInsets.zero,
+                                leading: Icon(
+                                  e.status == 'refused'
+                                      ? Icons.error_outline
+                                      : e.status == 'accepted'
+                                      ? Icons.verified_outlined
+                                      : Icons.schedule,
+                                ),
+                                title: Text('$student — ${e.displayType}'),
+                                subtitle: Text(
+                                  '${_label(e.status)} · ${_when(e.createdAt)}${note.isEmpty ? '' : '\nMotif : $note'}',
+                                ),
+                              );
+                            },
+                          ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('Fermer'),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
 
-  Future<void> showSyncLog() async {
-    final items = await widget.store.loadSyncLog();
+  Future<void> _log() async {
+    final logs = await widget.store.loadSyncLog();
     if (!mounted) return;
     await showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Journal de synchronisation'),
+        title: const Text('Diagnostic de synchronisation'),
         content: SizedBox(
-          width: 760,
-          child: items.isEmpty
-              ? const Text('Aucune synchronisation enregistrée.')
-              : ListView.separated(
-                  shrinkWrap: true,
-                  itemCount: items.length,
-                  separatorBuilder: (_, __) => const Divider(height: 12),
-                  itemBuilder: (_, i) => SelectableText(items[items.length - 1 - i]),
-                ),
+          width: 640,
+          height: 400,
+          child: SingleChildScrollView(
+            child: SelectableText(logs.reversed.join('\n\n')),
+          ),
         ),
         actions: [
           TextButton(
-            onPressed: items.isEmpty
-                ? null
-                : () async {
-                    await widget.store.clearSyncLog();
-                    if (context.mounted) Navigator.pop(context);
-                  },
+            onPressed: () async {
+              await widget.store.clearSyncLog();
+              if (context.mounted) Navigator.pop(context);
+            },
             child: const Text('Vider le journal'),
           ),
-          FilledButton(onPressed: () => Navigator.pop(context), child: const Text('Fermer')),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Fermer'),
+          ),
         ],
       ),
     );
   }
 
-  Future<void> backupLocal() async {
-    final raw = await widget.store.exportBundle();
-    await Clipboard.setData(ClipboardData(text: raw));
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Sauvegarde locale copiée dans le presse-papiers. Conservez-la dans un fichier texte privé.')));
+  Future<void> _backup() async {
+    try {
+      final raw = await widget.store.exportBundle();
+      await Clipboard.setData(ClipboardData(text: raw));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Sauvegarde copiée. Collez-la dans un fichier texte privé. Elle contient les données de cet appareil.',
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Sauvegarde impossible : $e')));
+      }
+    }
+  }
+
+  Future<void> _restore() async {
+    final field = TextEditingController();
+    try {
+      final raw = await showDialog<String>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Restaurer une sauvegarde V2.4'),
+          content: TextField(
+            controller: field,
+            maxLines: 8,
+            decoration: const InputDecoration(
+              labelText: 'Collez le contenu du fichier de sauvegarde',
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Annuler'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, field.text),
+              child: const Text('Restaurer sans effacer'),
+            ),
+          ],
+        ),
+      );
+      if (raw == null || raw.trim().isEmpty) return;
+      await widget.store.importBundle(raw);
+      await _refresh();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Sauvegarde fusionnée. Aucune saisie locale supprimée.',
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Restauration annulée : $e')));
+      }
+    } finally {
+      field.dispose();
+    }
+  }
+
+  Future<void> _changeAddress() async {
+    final old = await widget.store.loadConfig();
+    if (old == null || !mounted) return;
+    final field = TextEditingController(text: '${old.host}:${old.port}');
+    try {
+      final raw = await showDialog<String>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Adresse du PC Principal'),
+          content: TextField(
+            controller: field,
+            keyboardType: TextInputType.url,
+            decoration: const InputDecoration(
+              labelText: 'Nouvelle adresse affichée sur le PC',
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Annuler'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, field.text),
+              child: const Text('Vérifier et enregistrer'),
+            ),
+          ],
+        ),
+      );
+      if (raw == null || raw.trim().isEmpty) return;
+      await widget.coordinator.maintain(() async {
+        final device = await widget.store.getOrCreateDeviceId();
+        final found = await widget.api.pairAddress(
+          raw,
+          old.code,
+          deviceId: device,
+        );
+        if (found.teacher.trim().toLowerCase() !=
+                old.teacher.trim().toLowerCase() ||
+            (old.principalId.isNotEmpty &&
+                found.principalId != old.principalId)) {
+          throw StateError(
+            'Ce PC ou ce professeur ne correspond pas à votre connexion. Aucune donnée locale modifiée.',
+          );
+        }
+        final fresh = await widget.api.sync(found, deviceId: device);
+        await widget.store.activateSession(found, fresh);
+      });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Adresse actualisée. Les saisies locales sont conservées.',
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Adresse non modifiée : $e')));
+      }
+    } finally {
+      field.dispose();
+    }
+  }
+
+  Future<void> _disconnect() async {
+    if (widget.coordinator.busy) return;
+    try {
+      await widget.store.clearConfig();
+      widget.onDisconnect();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(e.toString())));
+      }
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    final c = widget.coordinator;
     final s = snapshot;
+    final error = localError ?? c.lastError;
+    final headline = localError != null
+        ? 'Attention : stockage local'
+        : c.busy
+        ? 'Synchronisation en cours…'
+        : error != null
+        ? 'Connexion à rétablir'
+        : pending > 0
+        ? '$pending saisie(s) à envoyer'
+        : 'Toutes les saisies sont transmises';
     return Scaffold(
       appBar: AppBar(
-        title: Text(s?.displayTitle ?? 'ÉCOLE GESTION PRO'),
+        title: Text(s?.displayTitle ?? 'GESTCOURS Prof'),
         actions: [
-          IconButton(tooltip: 'Synchroniser', onPressed: syncing ? null : sync, icon: const Icon(Icons.sync)),
           PopupMenuButton<String>(
-            onSelected: (v) async {
-              if (v == 'transmissions') await showTransmissionHistory();
-              if (v == 'log') await showSyncLog();
-              if (v == 'backup') await backupLocal();
-              if (v == 'disconnect') {
-                await widget.store.clearConfig();
-                widget.onDisconnect();
+            onSelected: (value) async {
+              switch (value) {
+                case 'address':
+                  await _changeAddress();
+                case 'history':
+                  await _history();
+                case 'log':
+                  await _log();
+                case 'backup':
+                  await _backup();
+                case 'restore':
+                  await _restore();
+                case 'disconnect':
+                  await _disconnect();
               }
             },
-            itemBuilder: (_) => const [
-              PopupMenuItem(value: 'transmissions', child: Text('Suivi des transmissions')),
-              PopupMenuItem(value: 'log', child: Text('Journal de synchronisation')),
-              PopupMenuItem(value: 'backup', child: Text('Sauvegarder les données locales')),
-              PopupMenuItem(value: 'disconnect', child: Text('Déconnecter cet appareil')),
+            itemBuilder: (_) => [
+              const PopupMenuItem(
+                value: 'history',
+                child: Text('Suivi des saisies'),
+              ),
+              const PopupMenuItem(value: 'log', child: Text('Diagnostic')),
+              PopupMenuItem(
+                value: 'address',
+                enabled: !c.busy,
+                child: const Text('Modifier l’adresse du Principal'),
+              ),
+              const PopupMenuItem(
+                value: 'backup',
+                child: Text('Sauvegarder cet appareil'),
+              ),
+              PopupMenuItem(
+                value: 'restore',
+                enabled: !c.busy,
+                child: const Text('Restaurer une sauvegarde'),
+              ),
+              PopupMenuItem(
+                value: 'disconnect',
+                enabled: !c.busy,
+                child: const Text('Déconnecter cet appareil'),
+              ),
             ],
           ),
         ],
       ),
       body: SafeArea(
         child: RefreshIndicator(
-          onRefresh: sync,
-          child: LayoutBuilder(builder: (context, constraints) {
-            final horizontal = constraints.maxWidth >= 720 ? 32.0 : 16.0;
-            return ListView(
-              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-              physics: const AlwaysScrollableScrollPhysics(),
-              padding: EdgeInsets.fromLTRB(horizontal, 16, horizontal, 48 + MediaQuery.of(context).padding.bottom),
-              children: [
-                SchoolHeader(title: s?.displayTitle ?? 'ÉCOLE GESTION PRO', subtitle: s?.schoolYear ?? '', teacher: widget.config.teacher),
-                const SizedBox(height: 14),
-                Card(child: ListTile(
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  leading: CircleAvatar(child: Icon(connected ? Icons.lan : Icons.wifi_off)),
-                  title: Text(connected ? 'PC Principal connecté' : 'Travail hors connexion', style: const TextStyle(fontWeight: FontWeight.w700)),
-                  subtitle: Text(status),
-                  trailing: syncing ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2)) : null,
-                )),
-                const SizedBox(height: 10),
-                if (lastReceived > 0 || lastConfirmed > 0 || lastRejected > 0 || lastDuplicates > 0 || lastUnsupported > 0)
-                  Card(
-                    child: Padding(
-                      padding: const EdgeInsets.all(14),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+          onRefresh: _sync,
+          child: ListView(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.all(16),
+            children: [
+              SchoolHeader(
+                title: s?.displayTitle ?? 'GESTCOURS Prof',
+                subtitle: s?.schoolYear ?? '',
+                teacher: widget.config.teacher,
+              ),
+              const SizedBox(height: 14),
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
                         children: [
-                          const Text('Diagnostic du dernier envoi', style: TextStyle(fontWeight: FontWeight.w800)),
-                          const SizedBox(height: 8),
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
-                            children: [
-                              Chip(label: Text('Reçus : $lastReceived')),
-                              Chip(label: Text('Accusés : $lastConfirmed')),
-                              if (lastRejected > 0) Chip(label: Text('Refusés : $lastRejected')),
-                              if (lastDuplicates > 0) Chip(label: Text('Doublons : $lastDuplicates')),
-                              if (lastUnsupported > 0) Chip(label: Text('Non compatibles : $lastUnsupported')),
-                            ],
+                          Icon(
+                            error != null
+                                ? Icons.wifi_off
+                                : pending > 0
+                                ? Icons.outbox_outlined
+                                : Icons.check_circle_outline,
                           ),
-                          const SizedBox(height: 6),
-                          const Text('Les saisies sont envoyées par petits lots. Une saisie nouvelle créée pendant l’envoi reste conservée localement.'),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              headline,
+                              style: Theme.of(context).textTheme.titleMedium,
+                            ),
+                          ),
                         ],
                       ),
+                      const SizedBox(height: 10),
+                      Text(
+                        'Dernière synchronisation réussie : ${_when(lastSync)}',
+                      ),
+                      if (pending > 0)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 6),
+                          child: Text(
+                            '$pending saisie(s) conservées sur cet appareil.',
+                          ),
+                        ),
+                      if (error != null)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 10),
+                          child: Text(error),
+                        ),
+                      if (c.busy)
+                        const Padding(
+                          padding: EdgeInsets.only(top: 12),
+                          child: LinearProgressIndicator(),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+              Card(
+                child: ListTile(
+                  onTap: _history,
+                  title: const Text('Décisions du Principal'),
+                  subtitle: Text(
+                    '$received à valider · $accepted validée(s) · $refused refusée(s)',
+                  ),
+                  trailing: const Icon(Icons.chevron_right),
+                ),
+              ),
+              const SizedBox(height: 16),
+              FilledButton.icon(
+                onPressed: s == null
+                    ? null
+                    : () async {
+                        await Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => ClassesScreen(
+                              config: widget.config,
+                              snapshot: s,
+                              store: widget.store,
+                            ),
+                          ),
+                        );
+                        await _refresh();
+                      },
+                icon: const Icon(Icons.groups_2_outlined),
+                label: Text('Mes classes (${s?.classes.length ?? 0})'),
+              ),
+              const SizedBox(height: 10),
+              OutlinedButton.icon(
+                onPressed: c.busy ? null : _sync,
+                icon: const Icon(Icons.sync),
+                label: const Text('Synchroniser maintenant'),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'Envoi automatique après vos saisies et au retour dans l’application. Le PC Principal doit rester ouvert sur le même réseau local.',
+              ),
+              const SizedBox(height: 14),
+              ExpansionTile(
+                title: const Text('Informations techniques'),
+                children: [
+                  ListTile(
+                    title: const Text('GESTCOURS Mobile V0.6.0 · Pack V2.4'),
+                    subtitle: Text(
+                      'Connexion : ${actualConfig?.host ?? widget.config.host}:${actualConfig?.port ?? widget.config.port}\nStockage local transactionnel SQLite',
                     ),
                   ),
-                const SizedBox(height: 10),
-                Card(child: ListTile(
-                  onTap: showTransmissionHistory,
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  leading: const CircleAvatar(child: Icon(Icons.outbox_outlined)),
-                  title: const Text('Saisies et validation', style: TextStyle(fontWeight: FontWeight.w700)),
-                  subtitle: Text('À envoyer : $pending  •  Reçues : $receivedCount  •  Validées : $acceptedCount  •  Refusées : $refusedCount'),
-                  trailing: const Icon(Icons.chevron_right),
-                )),
-                const SizedBox(height: 16),
-                FilledButton.icon(
-                  onPressed: s == null ? null : () => Navigator.push(context, MaterialPageRoute(builder: (_) => ClassesScreen(config: widget.config, snapshot: s, store: widget.store))).then((_) => load()),
-                  icon: const Icon(Icons.groups_2_outlined),
-                  label: Text('Mes classes (${s?.classes.length ?? 0})'),
-                ),
-                const SizedBox(height: 10),
-                OutlinedButton.icon(onPressed: syncing ? null : sync, icon: const Icon(Icons.sync), label: const Text('Synchroniser maintenant')),
-                const SizedBox(height: 20),
-                if (s != null) Wrap(spacing: 8, runSpacing: 8, children: [
-                  Chip(avatar: const Icon(Icons.history, size: 18), label: Text('${s.historyItems} historique(s)')),
-                  Chip(avatar: const Icon(Icons.menu_book, size: 18), label: Text('${s.references.lessons.length} leçon(s)')),
-                  Chip(avatar: const Icon(Icons.auto_stories, size: 18), label: Text('${s.references.surahs.length} sourate(s)')),
-                  Chip(avatar: const Icon(Icons.translate, size: 18), label: Text(s.references.receivedFromPrincipal ? 'Référentiel Principal reçu' : 'Référentiel à synchroniser')),
-                ]),
-              ],
-            );
-          }),
+                  ListTile(
+                    title: const Text('Ouvrir le diagnostic'),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: _log,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 30),
+            ],
+          ),
         ),
       ),
     );

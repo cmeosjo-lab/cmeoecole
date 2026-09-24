@@ -1,21 +1,14 @@
 import '../models/principal_config.dart';
 import '../models/school_data.dart';
-import '../models/teacher_event.dart';
 import 'local_store.dart';
 import 'principal_api.dart';
 
 class SyncResult {
   final bool connected;
-  final int sent;
-  final int received;
-  final int rejected;
-  final int duplicates;
-  final int unsupported;
-  final int remaining;
+  final int sent, received, rejected, duplicates, unsupported, remaining;
   final List<String> errors;
   final SyncSnapshot? snapshot;
   final String message;
-
   const SyncResult({
     required this.connected,
     required this.sent,
@@ -32,117 +25,122 @@ class SyncResult {
 
 class SyncService {
   static const int batchSize = 120;
+  static final _inFlight = Expando<Future<SyncResult>>();
   final LocalStore store;
   final PrincipalApi api;
   const SyncService(this.store, this.api);
+  int _int(dynamic v) => int.tryParse('$v') ?? 0;
 
-  int _asInt(dynamic value) => int.tryParse((value ?? '0').toString()) ?? 0;
-
-  List<String> _asErrors(dynamic value) {
-    if (value is! List) return const [];
-    return value.map((e) => e.toString().trim()).where((e) => e.isNotEmpty).toList();
+  Future<SyncResult> synchronize(PrincipalConfig config) {
+    final current = _inFlight[store];
+    if (current != null) return current;
+    final future = _run(config);
+    _inFlight[store] = future;
+    return future;
   }
 
-  Map<String, String> _rejectedReasons(dynamic value) {
-    final out = <String, String>{};
-    if (value is! List) return out;
-    for (final raw in value) {
-      if (raw is! Map) continue;
-      final map = Map<String, dynamic>.from(raw);
-      final id = (map['id'] ?? '').toString().trim();
-      if (id.isEmpty) continue;
-      out[id] = (map['reason'] ?? 'Saisie refusée par le Principal').toString().trim();
+  Future<SyncResult> _run(PrincipalConfig initial) async {
+    try {
+      return await _synchronize(initial);
+    } finally {
+      _inFlight[store] = null;
     }
-    return out;
   }
 
-  Future<void> _refreshReviewedStatuses(PrincipalConfig config, String deviceId) async {
-    final history = await store.loadTransmissionHistory();
-    final ids = history
-        .where((e) => e.status == 'received' || e.status == 'pending')
-        .map((e) => e.id)
-        .toList()
-        .reversed
-        .take(100)
-        .toList();
-    if (ids.isEmpty) return;
-    final statuses = await api.eventStatuses(config, ids, deviceId: deviceId);
-    if (statuses.isNotEmpty) await store.updateTransmissionStatuses(statuses);
-  }
-
-  Future<SyncResult> synchronize(PrincipalConfig config) async {
+  Future<SyncResult> _synchronize(PrincipalConfig initial) async {
     final deviceId = await store.getOrCreateDeviceId();
-    final online = await api.ping(config);
-    final queue = await store.loadQueue();
-    await store.appendSyncLog('Début synchronisation — file locale: ${queue.length} saisie(s).');
-    if (!online) {
-      await store.appendSyncLog('ÉCHEC — PC Principal indisponible. ${queue.length} saisie(s) conservée(s).');
-      return SyncResult(
-        connected: false,
-        sent: 0,
-        received: 0,
-        rejected: 0,
-        duplicates: 0,
-        unsupported: queue.where((e) => !e.supportedByPrincipal).length,
-        remaining: queue.length,
-        errors: const [],
-        snapshot: await store.loadSnapshot(),
-        message: 'Principal indisponible. ${queue.length} saisie(s) conservée(s) sur le téléphone.',
-      );
-    }
-
-    final sendable = queue.where((e) => e.supportedByPrincipal).toList();
-    final unsupported = queue.length - sendable.length;
-    var sent = 0;
-    var received = 0;
-    var rejected = 0;
-    var duplicates = 0;
-    final errors = <String>[];
-
-    for (var start = 0; start < sendable.length; start += batchSize) {
-      final end = (start + batchSize < sendable.length) ? start + batchSize : sendable.length;
-      final batch = sendable.sublist(start, end);
-      final response = await api.sendEvents(config, batch, deviceId: deviceId);
-      received += _asInt(response['received']);
-      rejected += _asInt(response['rejected']);
-      duplicates += _asInt(response['duplicates']);
-      errors.addAll(_asErrors(response['errors']));
-
-      final acknowledged = <String>{
-        if (response['acknowledgedIds'] is List)
-          ...(response['acknowledgedIds'] as List).map((e) => e.toString()).where((e) => e.trim().isNotEmpty),
-      };
-      final rejectedReasons = _rejectedReasons(response['rejectedItems']);
-      sent += acknowledged.length;
-      final remaining = await store.resolveQueue(
-        acknowledgedIds: acknowledged,
-        rejectedReasons: rejectedReasons,
-      );
-      await store.appendSyncLog(
-        'Lot ${start + 1}-$end/${sendable.length} — reçus: ${_asInt(response['received'])}, accusés: ${acknowledged.length}, rejetés: ${_asInt(response['rejected'])}, doublons: ${_asInt(response['duplicates'])}, restant local: $remaining${rejectedReasons.isEmpty ? '' : ' — refus: ${rejectedReasons.values.take(3).join(' | ')}'}',
-      );
-    }
-
-    if (unsupported > 0) {
-      await store.appendSyncLog('$unsupported saisie(s) locale(s) non reconnue(s) par cette version du protocole et conservée(s).');
-    }
-
-    await _refreshReviewedStatuses(config, deviceId);
+    var config = await store.loadConfig() ?? initial;
+    // Read and authenticate the Principal before sending any local data.
     final snapshot = await api.sync(config, deviceId: deviceId);
-    await store.saveSnapshot(snapshot);
-    await store.appendSyncLog('Référentiel/classes reçus — ${snapshot.classes.length} classe(s), ${snapshot.students.length} élève(s), ${snapshot.references.lessons.length} leçon(s).');
-
-    final remaining = (await store.loadQueue()).length;
-    final parts = <String>[
-      'Principal connecté.',
-      if (sendable.isNotEmpty) '$received reçu(s), $sent accusé(s) par le serveur',
-      if (rejected > 0) '$rejected refusé(s)',
-      if (duplicates > 0) '$duplicates doublon(s)',
-      if (unsupported > 0) '$unsupported saisie(s) non compatible(s)',
-      '$remaining en attente.',
-    ];
-    if (errors.isNotEmpty) parts.add('Détail : ${errors.take(3).join(' | ')}');
-
+    final remoteId = (snapshot.raw['principalId'] ?? '').toString();
+    if (config.principalId.isNotEmpty && remoteId != config.principalId) {
+      throw PrincipalApiException(
+        'Ce PC n’est pas le Principal enregistré. Aucune saisie n’a été envoyée.',
+      );
+    }
+    if (remoteId.isNotEmpty) config = config.withIdentity(remoteId);
+    await store.activateSession(config, snapshot);
+    final queue = await store.loadQueue(scope: config.scopeKey);
+    final sendable = queue
+        .where(
+          (e) =>
+              e.supportedByPrincipal &&
+              e.teacher.trim().toLowerCase() ==
+                  config.teacher.trim().toLowerCase(),
+        )
+        .toList();
+    final unsupported = queue.length - sendable.length;
+    var sent = 0, received = 0, rejected = 0, duplicates = 0;
+    final errors = <String>[];
+    for (var start = 0; start < sendable.length; start += batchSize) {
+      final end = (start + batchSize < sendable.length)
+          ? start + batchSize
+          : sendable.length;
+      final batch = sendable.sublist(start, end);
+      final batchIds = batch.map((e) => e.id).toSet();
+      final response = await api.sendEvents(config, batch, deviceId: deviceId);
+      final ack = <String>{
+        if (response['acknowledgedIds'] is List)
+          ...(response['acknowledgedIds'] as List)
+              .map((v) => v.toString())
+              .where(batchIds.contains),
+      };
+      final refused = <String, String>{};
+      if (response['rejectedItems'] is List) {
+        for (final item in response['rejectedItems'] as List) {
+          if (item is Map && batchIds.contains(item['id']?.toString())) {
+            refused[item['id'].toString()] =
+                (item['reason'] ?? 'Refus du Principal').toString();
+          }
+        }
+      }
+      await store.resolveQueue(
+        acknowledgedIds: ack,
+        rejectedReasons: refused,
+        scope: config.scopeKey,
+      );
+      sent += ack.length;
+      received += _int(response['received']);
+      duplicates += _int(response['duplicates']);
+      rejected += refused.length;
+      await store.appendSyncLog(
+        'Lot ${start + 1}–$end/${sendable.length} : ${ack.length} reçu(s), ${refused.length} refusé(s).',
+      );
+      if (ack.isEmpty && refused.isEmpty) {
+        throw PrincipalApiException(
+          'Le Principal n’a pas confirmé le lot. Les saisies sont conservées pour une nouvelle tentative.',
+        );
+      }
+    }
+    // All non-final receipts are queried in batches, not just the last 100.
+    final history = await store.loadTransmissionHistory(scope: config.scopeKey);
+    final ids = history
+        .where((e) => e.status == 'received')
+        .map((e) => e.id)
+        .toList();
+    for (var start = 0; start < ids.length; start += 80) {
+      final end = start + 80 < ids.length ? start + 80 : ids.length;
+      try {
+        final selected = ids.sublist(start, end);
+        final statuses = await api.eventStatuses(
+          config,
+          selected,
+          deviceId: deviceId,
+        );
+        statuses.removeWhere((key, _) => !selected.contains(key));
+        await store.updateTransmissionStatuses(
+          statuses,
+          scope: config.scopeKey,
+        );
+      } catch (_) {
+        errors.add(
+          'Les décisions du Principal seront actualisées à la prochaine synchronisation.',
+        );
+        break;
+      }
+    }
+    final remaining = (await store.loadQueue(scope: config.scopeKey)).length;
+    await store.markSuccessfulSync();
     return SyncResult(
       connected: true,
       sent: sent,
@@ -153,7 +151,9 @@ class SyncService {
       remaining: remaining,
       errors: errors,
       snapshot: snapshot,
-      message: parts.join(' '),
+      message: remaining == 0
+          ? 'Toutes les saisies ont été transmises.'
+          : '$remaining saisie(s) conservées à envoyer.',
     );
   }
 }

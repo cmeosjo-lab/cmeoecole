@@ -6,7 +6,11 @@ class LocalNetworkPermissionResult {
   final bool permanentlyDenied;
   final String message;
 
-  const LocalNetworkPermissionResult({required this.mayProceed, required this.permanentlyDenied, required this.message});
+  const LocalNetworkPermissionResult({
+    required this.mayProceed,
+    required this.permanentlyDenied,
+    required this.message,
+  });
 }
 
 class PlatformPermissions {
@@ -17,19 +21,39 @@ class PlatformPermissions {
   /// de NSLocalNetworkUsageDescription. Sur Android antérieur, l'appel est non bloquant.
   static Future<LocalNetworkPermissionResult> ensureLocalNetwork() async {
     if (!Platform.isAndroid) {
-      return const LocalNetworkPermissionResult(mayProceed: true, permanentlyDenied: false, message: 'Autorisation réseau local gérée par le système.');
+      return const LocalNetworkPermissionResult(
+        mayProceed: true,
+        permanentlyDenied: false,
+        message: 'Autorisation réseau local gérée par le système.',
+      );
     }
     try {
       final result = await Permission.accessLocalNetwork.request();
       if (result.isGranted || result.isLimited) {
-        return const LocalNetworkPermissionResult(mayProceed: true, permanentlyDenied: false, message: 'Réseau local autorisé.');
+        return const LocalNetworkPermissionResult(
+          mayProceed: true,
+          permanentlyDenied: false,
+          message: 'Réseau local autorisé.',
+        );
       }
       if (result.isPermanentlyDenied) {
-        return const LocalNetworkPermissionResult(mayProceed: false, permanentlyDenied: true, message: 'Accès au réseau local refusé dans les réglages Android.');
+        return const LocalNetworkPermissionResult(
+          mayProceed: false,
+          permanentlyDenied: true,
+          message: 'Accès au réseau local refusé dans les réglages Android.',
+        );
       }
-      return const LocalNetworkPermissionResult(mayProceed: true, permanentlyDenied: false, message: 'Connexion locale à tester.');
+      return const LocalNetworkPermissionResult(
+        mayProceed: true,
+        permanentlyDenied: false,
+        message: 'Connexion locale à tester.',
+      );
     } catch (_) {
-      return const LocalNetworkPermissionResult(mayProceed: true, permanentlyDenied: false, message: 'Connexion locale à tester.');
+      return const LocalNetworkPermissionResult(
+        mayProceed: true,
+        permanentlyDenied: false,
+        message: 'Connexion locale à tester.',
+      );
     }
   }
 }

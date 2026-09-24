@@ -59,12 +59,17 @@ class AppTheme {
           borderRadius: BorderRadius.circular(16),
           borderSide: const BorderSide(color: seed, width: 1.6),
         ),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 17),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 16,
+          vertical: 17,
+        ),
       ),
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
           minimumSize: const Size.fromHeight(54),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
           textStyle: const TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
         ),
       ),
@@ -72,7 +77,9 @@ class AppTheme {
         style: OutlinedButton.styleFrom(
           minimumSize: const Size.fromHeight(54),
           side: const BorderSide(color: Color(0xFFDCE2DE)),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
           textStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
         ),
       ),
@@ -86,10 +93,14 @@ class AppTheme {
         height: 72,
         backgroundColor: const Color(0xFFFFFEFC),
         indicatorColor: const Color(0xFFDDEEE9),
-        labelTextStyle: WidgetStateProperty.resolveWith((states) => TextStyle(
-          fontSize: 12,
-          fontWeight: states.contains(WidgetState.selected) ? FontWeight.w800 : FontWeight.w600,
-        )),
+        labelTextStyle: WidgetStateProperty.resolveWith(
+          (states) => TextStyle(
+            fontSize: 12,
+            fontWeight: states.contains(WidgetState.selected)
+                ? FontWeight.w800
+                : FontWeight.w600,
+          ),
+        ),
       ),
       visualDensity: VisualDensity.standard,
     );

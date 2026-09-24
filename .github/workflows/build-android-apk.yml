@@ -1,94 +1,10 @@
-name: Construire APK Android
-
+name: Ancienne chaîne Android - désactivée
 on:
   workflow_dispatch:
-  push:
-    branches: [ main ]
-
 permissions:
   contents: read
-
 jobs:
-  android-apk:
+  migration:
     runs-on: ubuntu-latest
-    env:
-      RELEASE_KEYSTORE_B64: ${{ secrets.GESTCOURS_RELEASE_KEYSTORE_B64 }}
-      RELEASE_STORE_PASSWORD: ${{ secrets.GESTCOURS_RELEASE_STORE_PASSWORD }}
-      RELEASE_KEY_ALIAS: ${{ secrets.GESTCOURS_RELEASE_KEY_ALIAS }}
-      RELEASE_KEY_PASSWORD: ${{ secrets.GESTCOURS_RELEASE_KEY_PASSWORD }}
-
     steps:
-      - name: Récupérer le projet
-        uses: actions/checkout@v5
-
-      - name: Installer Flutter stable
-        uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          cache: true
-
-      - name: Générer la plateforme Android
-        shell: bash
-        run: |
-          rm -rf android
-          flutter create --platforms=android --org fr.ecolegestion --project-name ecole_gestion_prof_mobile .
-          python3 ci/patch_android.py
-
-      - name: Installer les dépendances
-        run: flutter pub get
-
-      - name: Vérifier le code de l'application
-        run: flutter analyze lib --no-fatal-warnings --no-fatal-infos
-
-      - name: Construire l'APK release de validation
-        run: flutter build apk --release
-
-      - name: Préparer l'APK de validation
-        shell: bash
-        run: |
-          mkdir -p dist
-          cp build/app/outputs/flutter-apk/app-release.apk dist/GESTCOURS_PROF_ANDROID_V0_5_6_VALIDATION.apk
-
-      - name: Publier l'APK de validation
-        uses: actions/upload-artifact@v4
-        with:
-          name: GESTCOURS_PROF_ANDROID_V0_5_6_VALIDATION
-          path: dist/GESTCOURS_PROF_ANDROID_V0_5_6_VALIDATION.apk
-          if-no-files-found: error
-          retention-days: 30
-
-      - name: Préparer la clé de signature permanente
-        if: ${{ env.RELEASE_KEYSTORE_B64 != '' && env.RELEASE_STORE_PASSWORD != '' && env.RELEASE_KEY_ALIAS != '' && env.RELEASE_KEY_PASSWORD != '' }}
-        shell: bash
-        run: |
-          printf '%s' "$RELEASE_KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/GESTCOURS_RELEASE.p12"
-          chmod 600 "$RUNNER_TEMP/GESTCOURS_RELEASE.p12"
-
-      - name: Signer l'APK officielle avec la clé permanente
-        if: ${{ env.RELEASE_KEYSTORE_B64 != '' && env.RELEASE_STORE_PASSWORD != '' && env.RELEASE_KEY_ALIAS != '' && env.RELEASE_KEY_PASSWORD != '' }}
-        shell: bash
-        run: |
-          BUILD_TOOLS="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)"
-          ZIPALIGN="$BUILD_TOOLS/zipalign"
-          APKSIGNER="$BUILD_TOOLS/apksigner"
-          "$ZIPALIGN" -p -f 4             build/app/outputs/flutter-apk/app-release.apk             "$RUNNER_TEMP/GESTCOURS_PROF_ANDROID_V0_5_6_ALIGNED.apk"
-          "$APKSIGNER" sign             --ks "$RUNNER_TEMP/GESTCOURS_RELEASE.p12"             --ks-type PKCS12             --ks-pass env:RELEASE_STORE_PASSWORD             --ks-key-alias "$RELEASE_KEY_ALIAS"             --key-pass env:RELEASE_KEY_PASSWORD             --out dist/GESTCOURS_PROF_ANDROID_V0_5_6_OFFICIEL.apk             "$RUNNER_TEMP/GESTCOURS_PROF_ANDROID_V0_5_6_ALIGNED.apk"
-          "$APKSIGNER" verify --verbose --print-certs dist/GESTCOURS_PROF_ANDROID_V0_5_6_OFFICIEL.apk
-
-      - name: Publier l'APK officielle
-        if: ${{ env.RELEASE_KEYSTORE_B64 != '' && env.RELEASE_STORE_PASSWORD != '' && env.RELEASE_KEY_ALIAS != '' && env.RELEASE_KEY_PASSWORD != '' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: GESTCOURS_PROF_ANDROID_V0_5_6_OFFICIEL
-          path: dist/GESTCOURS_PROF_ANDROID_V0_5_6_OFFICIEL.apk
-          if-no-files-found: error
-          retention-days: 30
-
-      - name: Empêcher toute confusion avec une APK officielle
-        if: ${{ !(env.RELEASE_KEYSTORE_B64 != '' && env.RELEASE_STORE_PASSWORD != '' && env.RELEASE_KEY_ALIAS != '' && env.RELEASE_KEY_PASSWORD != '') }}
-        shell: bash
-        run: |
-          echo '### V0.5.6 compilée en validation uniquement' >> "$GITHUB_STEP_SUMMARY"
-          echo '' >> "$GITHUB_STEP_SUMMARY"
-          echo 'Aucune APK OFFICIELLE n’est publiée sans la clé GESTCOURS permanente.' >> "$GITHUB_STEP_SUMMARY"
-          echo 'Configurez les quatre secrets GESTCOURS_RELEASE_* pour activer la signature permanente.' >> "$GITHUB_STEP_SUMMARY"
+      - run: echo 'Utilisez GESTCOURS V2.4 - tests et applications. Les APK doivent conserver la signature permanente GESTCOURS.'

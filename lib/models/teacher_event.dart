@@ -32,44 +32,47 @@ class TeacherEvent {
     required String classId,
     String deviceId = '',
     required Map<String, dynamic> payload,
-  }) =>
-      TeacherEvent(
-        id: 'MOB-${DateTime.now().millisecondsSinceEpoch}-${_uuid.v4()}',
-        type: type,
-        teacher: teacher,
-        studentId: studentId,
-        classId: classId,
-        deviceId: deviceId,
-        createdAt: DateTime.now(),
-        payload: payload,
-      );
+  }) => TeacherEvent(
+    id: 'MOB-${DateTime.now().millisecondsSinceEpoch}-${_uuid.v4()}',
+    type: type,
+    teacher: teacher,
+    studentId: studentId,
+    classId: classId,
+    deviceId: deviceId,
+    createdAt: DateTime.now(),
+    payload: payload,
+  );
 
   factory TeacherEvent.fromJson(Map<String, dynamic> json) => TeacherEvent(
-        id: (json['id'] ?? '').toString(),
-        type: (json['type'] ?? json['category'] ?? '').toString(),
-        teacher: (json['teacher'] ?? '').toString(),
-        studentId: (json['studentId'] ?? '').toString(),
-        classId: (json['classId'] ?? '').toString(),
-        deviceId: (json['deviceId'] ?? '').toString(),
-        createdAt: DateTime.tryParse((json['createdAt'] ?? '').toString()) ?? DateTime.now(),
-        payload: json['payload'] is Map ? Map<String, dynamic>.from(json['payload']) : <String, dynamic>{},
-        status: (json['_mobileStatus'] ?? 'pending').toString(),
-      );
+    id: (json['id'] ?? '').toString(),
+    type: (json['type'] ?? json['category'] ?? '').toString(),
+    teacher: (json['teacher'] ?? '').toString(),
+    studentId: (json['studentId'] ?? '').toString(),
+    classId: (json['classId'] ?? '').toString(),
+    deviceId: (json['deviceId'] ?? '').toString(),
+    createdAt:
+        DateTime.tryParse((json['createdAt'] ?? '').toString()) ??
+        DateTime.now(),
+    payload: json['payload'] is Map
+        ? Map<String, dynamic>.from(json['payload'])
+        : <String, dynamic>{},
+    status: (json['_mobileStatus'] ?? 'pending').toString(),
+  );
 
   bool get supportedByPrincipal => const {
-        'attendance',
-        'evaluation',
-        'communication',
-        'quranValidation',
-        'quran_validation',
-        'quranProgress',
-        'quran_progress',
-        'homework',
-        'lessonFollowUp',
-        'lesson_follow_up',
-        'annualAppreciation',
-        'annual_appreciation',
-      }.contains(type);
+    'attendance',
+    'evaluation',
+    'communication',
+    'quranValidation',
+    'quran_validation',
+    'quranProgress',
+    'quran_progress',
+    'homework',
+    'lessonFollowUp',
+    'lesson_follow_up',
+    'annualAppreciation',
+    'annual_appreciation',
+  }.contains(type);
 
   String get protocolType {
     if (type == 'quranValidation') return 'quran_validation';
@@ -147,16 +150,16 @@ class TeacherEvent {
   }
 
   Map<String, dynamic> toLocalJson() => {
-        'id': id,
-        'type': type,
-        'teacher': teacher,
-        'studentId': studentId,
-        'classId': classId,
-        'deviceId': deviceId,
-        'createdAt': createdAt.toIso8601String(),
-        'payload': payload,
-        '_mobileStatus': status,
-      };
+    'id': id,
+    'type': type,
+    'teacher': teacher,
+    'studentId': studentId,
+    'classId': classId,
+    'deviceId': deviceId,
+    'createdAt': createdAt.toIso8601String(),
+    'payload': payload,
+    '_mobileStatus': status,
+  };
 
   TeacherEvent copyWithStatus(String newStatus, {String? reviewNote}) {
     final nextPayload = Map<String, dynamic>.from(payload);
