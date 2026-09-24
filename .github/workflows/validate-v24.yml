@@ -50,7 +50,7 @@ jobs:
           git archive --format=zip -o dist/GESTCOURS_MOBILE_V0_6_0_SOURCES.zip HEAD
       - name: Analyse statique
         shell: bash
-        run: flutter analyze lib test --no-fatal-infos 2>&1 | tee dist/flutter-analyze.txt
+        run: flutter analyze lib test 2>&1 | tee dist/flutter-analyze.txt
       - name: Tests de migration, panne, lots et affichage
         shell: bash
         run: flutter test --reporter expanded test 2>&1 | tee dist/flutter-tests.txt
@@ -74,13 +74,15 @@ jobs:
           flutter-version: '3.47.5'
           channel: stable
           cache: true
-      - name: Préparer Android sans écraser le code
+      - name: Préparer Android sans écraser le code ni les dépendances
         shell: bash
         run: |
-          sha256sum lib/main.dart > /tmp/main.sha256
+          sha256sum lib/main.dart pubspec.yaml pubspec.lock > /tmp/source.sha256
           rm -rf android
           flutter create --no-pub --platforms=android --org fr.ecolegestion --project-name ecole_gestion_prof_mobile .
-          sha256sum -c /tmp/main.sha256
+          git restore --source=HEAD -- lib test pubspec.yaml pubspec.lock analysis_options.yaml
+          rm -f test/widget_test.dart
+          sha256sum -c /tmp/source.sha256
           python3 ci/patch_android.py
           flutter pub get --enforce-lockfile
       - name: Compiler APK universelle et APK ARM64
@@ -101,6 +103,14 @@ jobs:
           done
           cp "$BT/lib/apksigner.jar" dist/apksigner.jar
           sha256sum dist/*.apk > dist/SHA256_VALIDATION.txt
+      - name: Signature permanente lorsque les secrets sont configurés
+        shell: bash
+        env:
+          RELEASE_KEYSTORE_B64: ${{ secrets.GESTCOURS_RELEASE_KEYSTORE_B64 }}
+          RELEASE_STORE_PASSWORD: ${{ secrets.GESTCOURS_RELEASE_STORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.GESTCOURS_RELEASE_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.GESTCOURS_RELEASE_KEY_PASSWORD }}
+        run: python3 ci/sign_android_release.py
       - uses: actions/upload-artifact@v4
         with:
           name: GESTCOURS_ANDROID_V0_6_0_RELEASE_A_SIGNER
@@ -120,13 +130,15 @@ jobs:
           flutter-version: '3.47.5'
           channel: stable
           cache: true
-      - name: Préparer iOS
+      - name: Préparer iOS sans modifier les sources vérifiées
         shell: bash
         run: |
-          shasum -a 256 lib/main.dart > /tmp/main.sha256
+          shasum -a 256 lib/main.dart pubspec.yaml pubspec.lock > /tmp/source.sha256
           rm -rf ios
           flutter create --no-pub --platforms=ios --org fr.ecolegestion --project-name ecole_gestion_prof_mobile .
-          shasum -a 256 -c /tmp/main.sha256
+          git restore --source=HEAD -- lib test pubspec.yaml pubspec.lock analysis_options.yaml
+          rm -f test/widget_test.dart
+          shasum -a 256 -c /tmp/source.sha256
           python3 ci/patch_ios.py
           flutter pub get --enforce-lockfile
       - name: Compiler et préparer IPA à signer
