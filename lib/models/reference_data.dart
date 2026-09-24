@@ -21,15 +21,20 @@ class ReferenceItem {
     final parts = <String>[];
     if (number > 0) parts.add('$number');
     if (arabic.trim().isNotEmpty) parts.add(arabic.trim());
-    if (label.trim().isNotEmpty && label.trim() != arabic.trim()) parts.add(label.trim());
+    if (label.trim().isNotEmpty && label.trim() != arabic.trim())
+      parts.add(label.trim());
     return parts.isEmpty ? id : parts.join(' — ');
   }
 
-  factory ReferenceItem.fromJson(Map<String, dynamic> json, {int fallbackNumber = 0}) {
+  factory ReferenceItem.fromJson(
+    Map<String, dynamic> json, {
+    int fallbackNumber = 0,
+  }) {
     String pick(List<String> keys) {
       for (final key in keys) {
         final value = json[key];
-        if (value != null && value.toString().trim().isNotEmpty) return value.toString().trim();
+        if (value != null && value.toString().trim().isNotEmpty)
+          return value.toString().trim();
       }
       return '';
     }
@@ -43,12 +48,26 @@ class ReferenceItem {
       return fallback;
     }
 
-    final number = pickInt(['number', 'num', 'surahNumber', 'hizbNumber', 'juzNumber', 'lessonNumber'], fallbackNumber);
+    final number = pickInt([
+      'number',
+      'num',
+      'surahNumber',
+      'hizbNumber',
+      'juzNumber',
+      'lessonNumber',
+    ], fallbackNumber);
     final id = pick(['id', 'key', 'lessonId', 'code']);
     return ReferenceItem(
       id: id.isEmpty ? (number > 0 ? '$number' : pick(['name', 'label'])) : id,
       number: number,
-      label: pick(['label', 'name', 'latin', 'french', 'transliteration', 'title']),
+      label: pick([
+        'label',
+        'name',
+        'latin',
+        'french',
+        'transliteration',
+        'title',
+      ]),
       arabic: pick(['arabic', 'arabicName', 'nameArabic', 'arabicLabel']),
       verseCount: pickInt(['verseCount', 'verses', 'ayahCount', 'ayatCount']),
       subject: pick(['subject', 'matiere', 'category']),
@@ -88,7 +107,11 @@ class ReferenceCatalog {
     raw: {},
   );
 
-  static dynamic _findValue(dynamic node, Set<String> aliases, [int depth = 0]) {
+  static dynamic _findValue(
+    dynamic node,
+    Set<String> aliases, [
+    int depth = 0,
+  ]) {
     if (depth > 5) return null;
     if (node is Map) {
       final map = Map<String, dynamic>.from(node);
@@ -96,8 +119,17 @@ class ReferenceCatalog {
         if (aliases.contains(entry.key.toLowerCase())) return entry.value;
       }
       const preferredContainers = {
-        'referencedata', 'references', 'catalogs', 'catalogue', 'quran', 'quranreference',
-        'qurancatalog', 'schooldata', 'metadata', 'lists', 'listes',
+        'referencedata',
+        'references',
+        'catalogs',
+        'catalogue',
+        'quran',
+        'quranreference',
+        'qurancatalog',
+        'schooldata',
+        'metadata',
+        'lists',
+        'listes',
       };
       for (final entry in map.entries) {
         if (preferredContainers.contains(entry.key.toLowerCase())) {
@@ -121,11 +153,24 @@ class ReferenceCatalog {
     for (var i = 0; i < value.length; i++) {
       final raw = value[i];
       if (raw is Map) {
-        result.add(ReferenceItem.fromJson(Map<String, dynamic>.from(raw), fallbackNumber: i + 1));
+        result.add(
+          ReferenceItem.fromJson(
+            Map<String, dynamic>.from(raw),
+            fallbackNumber: i + 1,
+          ),
+        );
       } else if (raw != null && raw.toString().trim().isNotEmpty) {
-        result.add(ReferenceItem(
-          id: '${i + 1}', number: i + 1, label: raw.toString().trim(), arabic: '', verseCount: 0, subject: '', raw: {'name': raw.toString()},
-        ));
+        result.add(
+          ReferenceItem(
+            id: '${i + 1}',
+            number: i + 1,
+            label: raw.toString().trim(),
+            arabic: '',
+            verseCount: 0,
+            subject: '',
+            raw: {'name': raw.toString()},
+          ),
+        );
       }
     }
     result.sort((a, b) {
@@ -139,28 +184,60 @@ class ReferenceCatalog {
 
   static List<String> _strings(dynamic value) {
     if (value is! List) return const [];
-    return value.map((e) {
-      if (e is Map) {
-        final m = Map<String, dynamic>.from(e);
-        return (m['label'] ?? m['name'] ?? m['nature'] ?? m['type'] ?? '').toString().trim();
-      }
-      return e?.toString().trim() ?? '';
-    }).where((e) => e.isNotEmpty).toSet().toList();
+    return value
+        .map((e) {
+          if (e is Map) {
+            final m = Map<String, dynamic>.from(e);
+            return (m['label'] ?? m['name'] ?? m['nature'] ?? m['type'] ?? '')
+                .toString()
+                .trim();
+          }
+          return e?.toString().trim() ?? '';
+        })
+        .where((e) => e.isNotEmpty)
+        .toSet()
+        .toList();
   }
 
   factory ReferenceCatalog.fromRoot(Map<String, dynamic> root) {
-    final surahsRaw = _findValue(root, {'surahs', 'surah', 'sourates', 'quransurahs', 'surahitems'});
-    final hizbsRaw = _findValue(root, {'hizbs', 'ahzab', 'quranhizbs', 'hizbitems'});
+    final surahsRaw = _findValue(root, {
+      'surahs',
+      'surah',
+      'sourates',
+      'quransurahs',
+      'surahitems',
+    });
+    final hizbsRaw = _findValue(root, {
+      'hizbs',
+      'ahzab',
+      'quranhizbs',
+      'hizbitems',
+    });
     final juzsRaw = _findValue(root, {'juzs', 'ajza', 'quranjuzs', 'juzitems'});
-    final lessonsRaw = _findValue(root, {'lessons', 'schoollessons', 'lecons', 'lessonitems'});
-    final incidentsRaw = _findValue(root, {'incidenttypes', 'incidentnatures', 'natureincidents', 'disciplinetypes'});
+    final lessonsRaw = _findValue(root, {
+      'lessons',
+      'schoollessons',
+      'lecons',
+      'lessonitems',
+    });
+    final incidentsRaw = _findValue(root, {
+      'incidenttypes',
+      'incidentnatures',
+      'natureincidents',
+      'disciplinetypes',
+    });
 
     final surahs = _items(surahsRaw);
     final hizbs = _items(hizbsRaw);
     final juzs = _items(juzsRaw);
     final lessons = _items(lessonsRaw);
     final incidentTypes = _strings(incidentsRaw);
-    final received = surahs.isNotEmpty || hizbs.isNotEmpty || juzs.isNotEmpty || lessons.isNotEmpty || incidentTypes.isNotEmpty;
+    final received =
+        surahs.isNotEmpty ||
+        hizbs.isNotEmpty ||
+        juzs.isNotEmpty ||
+        lessons.isNotEmpty ||
+        incidentTypes.isNotEmpty;
 
     return ReferenceCatalog(
       surahs: surahs,
@@ -176,7 +253,9 @@ class ReferenceCatalog {
   List<ReferenceItem> lessonsFor({String? subject}) {
     if (subject == null || subject.trim().isEmpty) return lessons;
     final key = subject.trim().toLowerCase();
-    final filtered = lessons.where((e) => e.subject.toLowerCase() == key).toList();
+    final filtered = lessons
+        .where((e) => e.subject.toLowerCase() == key)
+        .toList();
     return filtered.isEmpty ? lessons : filtered;
   }
 }

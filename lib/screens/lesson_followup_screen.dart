@@ -1,3 +1,4 @@
+import '../services/safe_save.dart';
 import 'package:flutter/material.dart';
 import '../models/principal_config.dart';
 import '../models/reference_data.dart';
@@ -10,13 +11,20 @@ class LessonFollowUpScreen extends StatefulWidget {
   final SyncSnapshot snapshot;
   final Student student;
   final LocalStore store;
-  const LessonFollowUpScreen({super.key, required this.config, required this.snapshot, required this.student, required this.store});
+  const LessonFollowUpScreen({
+    super.key,
+    required this.config,
+    required this.snapshot,
+    required this.student,
+    required this.store,
+  });
 
   @override
   State<LessonFollowUpScreen> createState() => _LessonFollowUpScreenState();
 }
 
-class _LessonFollowUpScreenState extends State<LessonFollowUpScreen> {
+class _LessonFollowUpScreenState extends State<LessonFollowUpScreen>
+    with SafeSave<LessonFollowUpScreen> {
   String? subject;
   ReferenceItem? lesson;
   String status = 'Fait';
@@ -27,9 +35,13 @@ class _LessonFollowUpScreenState extends State<LessonFollowUpScreen> {
     return '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year.toString().padLeft(4, '0')}';
   }
 
-  Future<void> save() async {
+  Future<void> save() => saveGuarded(_performSave);
+
+  Future<void> _performSave() async {
     if (lesson == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Choisir une leçon.')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Choisir une leçon.')));
       return;
     }
     final deviceId = await widget.store.getOrCreateDeviceId();
@@ -51,8 +63,20 @@ class _LessonFollowUpScreenState extends State<LessonFollowUpScreen> {
     );
     await widget.store.enqueue(event);
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Suivi de leçon enregistré. Synchroniser pour l’envoyer au Principal.')));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Suivi de leçon enregistré. Synchroniser pour l’envoyer au Principal.',
+        ),
+      ),
+    );
     Navigator.pop(context, true);
+  }
+
+  @override
+  void dispose() {
+    note.dispose();
+    super.dispose();
   }
 
   @override
@@ -61,7 +85,13 @@ class _LessonFollowUpScreenState extends State<LessonFollowUpScreen> {
       final classId = (e.raw['classId'] ?? '').toString().trim();
       return classId.isEmpty || classId == widget.student.classId;
     }).toList();
-    final subjects = allLessons.map((e) => e.subject.trim()).where((e) => e.isNotEmpty).toSet().toList()..sort();
+    final subjects =
+        allLessons
+            .map((e) => e.subject.trim())
+            .where((e) => e.isNotEmpty)
+            .toSet()
+            .toList()
+          ..sort();
     final lessons = subject == null || subject!.isEmpty
         ? allLessons
         : allLessons.where((e) => e.subject.trim() == subject).toList();
@@ -72,24 +102,46 @@ class _LessonFollowUpScreenState extends State<LessonFollowUpScreen> {
         child: ListView(
           keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
           physics: const AlwaysScrollableScrollPhysics(),
-          padding: EdgeInsets.fromLTRB(16, 16, 16, 48 + MediaQuery.of(context).padding.bottom + MediaQuery.of(context).viewInsets.bottom),
+          padding: EdgeInsets.fromLTRB(
+            16,
+            16,
+            16,
+            48 +
+                MediaQuery.of(context).padding.bottom +
+                MediaQuery.of(context).viewInsets.bottom,
+          ),
           children: [
-            Text('Suivi de leçon — ${widget.student.displayName}', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800)),
+            Text(
+              'Suivi de leçon — ${widget.student.displayName}',
+              style: Theme.of(
+                context,
+              ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
+            ),
             const SizedBox(height: 10),
             Container(
               padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(color: Theme.of(context).colorScheme.secondaryContainer, borderRadius: BorderRadius.circular(12)),
-              child: const Text('Le suivi est transmis au Principal, où il reste soumis à validation avant intégration au suivi de la leçon.'),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.secondaryContainer,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Text(
+                'Le suivi est transmis au Principal, où il reste soumis à validation avant intégration au suivi de la leçon.',
+              ),
             ),
             const SizedBox(height: 16),
             if (subjects.isNotEmpty) ...[
               DropdownButtonFormField<String>(
-                value: subject,
+                initialValue: subject,
                 isExpanded: true,
                 decoration: const InputDecoration(labelText: 'Matière'),
                 items: [
-                  const DropdownMenuItem<String>(value: '', child: Text('Toutes les matières')),
-                  ...subjects.map((e) => DropdownMenuItem<String>(value: e, child: Text(e))),
+                  const DropdownMenuItem<String>(
+                    value: '',
+                    child: Text('Toutes les matières'),
+                  ),
+                  ...subjects.map(
+                    (e) => DropdownMenuItem<String>(value: e, child: Text(e)),
+                  ),
                 ],
                 onChanged: (v) => setState(() {
                   subject = (v == null || v.isEmpty) ? null : v;
@@ -99,38 +151,68 @@ class _LessonFollowUpScreenState extends State<LessonFollowUpScreen> {
               const SizedBox(height: 12),
             ],
             DropdownButtonFormField<ReferenceItem>(
-              value: lesson,
+              initialValue: lesson,
               isExpanded: true,
               decoration: const InputDecoration(labelText: 'Leçon'),
               items: lessons.map((e) {
                 final date = (e.raw['date'] ?? '').toString().trim();
-                final prefix = [date, e.subject].where((x) => x.trim().isNotEmpty).join(' — ');
-                return DropdownMenuItem(value: e, child: Text('${prefix.isEmpty ? '' : '$prefix — '}${e.displayLabel}', overflow: TextOverflow.ellipsis));
+                final prefix = [
+                  date,
+                  e.subject,
+                ].where((x) => x.trim().isNotEmpty).join(' — ');
+                return DropdownMenuItem(
+                  value: e,
+                  child: Text(
+                    '${prefix.isEmpty ? '' : '$prefix — '}${e.displayLabel}',
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                );
               }).toList(),
-              onChanged: lessons.isEmpty ? null : (v) => setState(() => lesson = v),
+              onChanged: lessons.isEmpty
+                  ? null
+                  : (v) => setState(() => lesson = v),
             ),
             if (lessons.isEmpty) ...[
               const SizedBox(height: 8),
-              const Text('Aucune leçon de cette classe n’a été reçue du PC Principal. Synchronisez après avoir créé les leçons côté Principal.', style: TextStyle(fontStyle: FontStyle.italic)),
+              const Text(
+                'Aucune leçon de cette classe n’a été reçue du PC Principal. Synchronisez après avoir créé les leçons côté Principal.',
+                style: TextStyle(fontStyle: FontStyle.italic),
+              ),
             ],
             const SizedBox(height: 12),
             DropdownButtonFormField<String>(
-              value: status,
+              initialValue: status,
               decoration: const InputDecoration(labelText: 'État'),
               items: const [
                 DropdownMenuItem(value: 'Fait', child: Text('Fait')),
                 DropdownMenuItem(value: 'Vérifié', child: Text('Vérifié')),
-                DropdownMenuItem(value: 'Fait partiellement', child: Text('Fait partiellement')),
+                DropdownMenuItem(
+                  value: 'Fait partiellement',
+                  child: Text('Fait partiellement'),
+                ),
                 DropdownMenuItem(value: 'Non fait', child: Text('Non fait')),
                 DropdownMenuItem(value: 'Reporté', child: Text('Reporté')),
-                DropdownMenuItem(value: 'À renseigner', child: Text('À renseigner')),
+                DropdownMenuItem(
+                  value: 'À renseigner',
+                  child: Text('À renseigner'),
+                ),
               ],
               onChanged: (v) => setState(() => status = v ?? 'Fait'),
             ),
             const SizedBox(height: 12),
-            TextField(controller: note, maxLines: 3, decoration: const InputDecoration(labelText: 'Observation facultative')),
+            TextField(
+              controller: note,
+              maxLines: 3,
+              decoration: const InputDecoration(
+                labelText: 'Observation facultative',
+              ),
+            ),
             const SizedBox(height: 22),
-            FilledButton.icon(onPressed: lessons.isEmpty ? null : save, icon: const Icon(Icons.save_outlined), label: const Text('Enregistrer')),
+            FilledButton.icon(
+              onPressed: lessons.isEmpty ? null : save,
+              icon: const Icon(Icons.save_outlined),
+              label: const Text('Enregistrer'),
+            ),
           ],
         ),
       ),
