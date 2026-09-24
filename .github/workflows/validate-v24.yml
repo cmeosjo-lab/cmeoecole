@@ -1,0 +1,178 @@
+name: GESTCOURS V2.4 - tests et applications
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, 'release/v2.4.0-stability']
+    paths: ['lib/**', 'test/**', 'pubspec*', 'ci/**', '.github/workflows/validate-v24.yml']
+permissions:
+  contents: read
+concurrency:
+  group: gestcours-v24-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: write
+    outputs:
+      source_sha: ${{ steps.source.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.ref_name }}
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.5'
+          channel: stable
+          cache: true
+      - name: Préparer les sources V2.4
+        run: python3 ci/apply_v24.py
+      - name: Résoudre les dépendances
+        run: flutter pub get
+      - name: Nettoyer les API dépréciées et formater
+        run: |
+          dart fix --apply lib
+          dart format lib test
+      - name: Enregistrer les sources exactes à tester
+        id: source
+        shell: bash
+        run: |
+          git config user.name 'GESTCOURS Build'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add lib test pubspec.yaml pubspec.lock ci/V24_MIGRATED
+          if ! git diff --cached --quiet; then
+            git commit -m 'Préparer V0.6.0 : sources formatées et dépendances verrouillées'
+            git push origin HEAD:${GITHUB_REF_NAME}
+          fi
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          mkdir -p dist
+          git archive --format=zip -o dist/GESTCOURS_MOBILE_V0_6_0_SOURCES.zip HEAD
+      - name: Analyse statique
+        shell: bash
+        run: flutter analyze lib test --no-fatal-infos 2>&1 | tee dist/flutter-analyze.txt
+      - name: Tests de migration, panne, lots et affichage
+        shell: bash
+        run: flutter test --reporter expanded test 2>&1 | tee dist/flutter-tests.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: GESTCOURS_V24_TESTS_SOURCES
+          path: dist/
+          if-no-files-found: warn
+          retention-days: 30
+  android:
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.validate.outputs.source_sha }}
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.5'
+          channel: stable
+          cache: true
+      - name: Préparer Android sans écraser le code
+        shell: bash
+        run: |
+          sha256sum lib/main.dart > /tmp/main.sha256
+          rm -rf android
+          flutter create --no-pub --platforms=android --org fr.ecolegestion --project-name ecole_gestion_prof_mobile .
+          sha256sum -c /tmp/main.sha256
+          python3 ci/patch_android.py
+          flutter pub get --enforce-lockfile
+      - name: Compiler APK universelle et APK ARM64
+        shell: bash
+        run: |
+          mkdir -p dist
+          flutter build apk --release
+          cp build/app/outputs/flutter-apk/app-release.apk dist/GESTCOURS_PROF_ANDROID_V0_6_0_UNIVERSEL_VALIDATION.apk
+          flutter build apk --release --split-per-abi
+          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk dist/GESTCOURS_PROF_ANDROID_V0_6_0_ARM64_VALIDATION.apk
+      - name: Contrôler les fichiers et conserver l'outil officiel de signature
+        shell: bash
+        run: |
+          BT=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)
+          for APK in dist/*.apk; do
+            "$BT/apksigner" verify --verbose --print-certs "$APK" >> dist/apk-inspection.txt
+            "$BT/aapt" dump badging "$APK" >> dist/apk-inspection.txt
+          done
+          cp "$BT/lib/apksigner.jar" dist/apksigner.jar
+          sha256sum dist/*.apk > dist/SHA256_VALIDATION.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GESTCOURS_ANDROID_V0_6_0_RELEASE_A_SIGNER
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
+  ios:
+    needs: validate
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.validate.outputs.source_sha }}
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.5'
+          channel: stable
+          cache: true
+      - name: Préparer iOS
+        shell: bash
+        run: |
+          shasum -a 256 lib/main.dart > /tmp/main.sha256
+          rm -rf ios
+          flutter create --no-pub --platforms=ios --org fr.ecolegestion --project-name ecole_gestion_prof_mobile .
+          shasum -a 256 -c /tmp/main.sha256
+          python3 ci/patch_ios.py
+          flutter pub get --enforce-lockfile
+      - name: Compiler et préparer IPA à signer
+        shell: bash
+        run: |
+          flutter build ios --release --no-codesign
+          APP=build/ios/iphoneos/Runner.app
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$APP/Info.plist")" = '0.6.0'
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP/Info.plist")" = '14'
+          mkdir -p dist "$RUNNER_TEMP/ipa/Payload"
+          file "$APP/Runner" > dist/ios-inspection.txt
+          /usr/libexec/PlistBuddy -c Print "$APP/Info.plist" >> dist/ios-inspection.txt
+          ditto "$APP" "$RUNNER_TEMP/ipa/Payload/Runner.app"
+          OUT="$PWD/dist/GESTCOURS_PROF_IOS_V0_6_0_A_SIGNER.ipa"
+          (cd "$RUNNER_TEMP/ipa" && zip -qry "$OUT" Payload)
+          shasum -a 256 "$OUT" > dist/SHA256_IOS.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GESTCOURS_IOS_V0_6_0_A_SIGNER
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
+  windows-storage:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    strategy:
+      matrix:
+        arch: [amd64, '386']
+    env:
+      GOARCH: ${{ matrix.arch }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.2'
+          cache: false
+      - name: Tests réels des écritures atomiques Windows
+        shell: pwsh
+        run: |
+          cd ci/windows_persistence
+          go test -v -count=1 ./... 2>&1 | Tee-Object -FilePath windows-tests.txt
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: GESTCOURS_WINDOWS_STORAGE_${{ matrix.arch }}
+          path: ci/windows_persistence/windows-tests.txt
+          if-no-files-found: warn
+          retention-days: 30

@@ -1,100 +1,10 @@
-name: Construire iOS
-
+name: Ancienne chaîne iOS - désactivée
 on:
   workflow_dispatch:
-  push:
-    branches: [ main ]
-    paths:
-      - "lib/**"
-      - "pubspec.yaml"
-      - "ci/patch_ios.py"
-      - "ci/sign_ios.sh"
-      - ".github/workflows/build-ios.yml"
-
 permissions:
   contents: read
-
 jobs:
-  ios-build:
-    runs-on: macos-15
-    env:
-      IOS_CERTIFICATE_P12_B64: ${{ secrets.GESTCOURS_IOS_CERTIFICATE_P12_B64 }}
-      IOS_CERTIFICATE_PASSWORD: ${{ secrets.GESTCOURS_IOS_CERTIFICATE_PASSWORD }}
-      IOS_PROVISIONING_PROFILE_B64: ${{ secrets.GESTCOURS_IOS_PROVISIONING_PROFILE_B64 }}
-      IOS_KEYCHAIN_PASSWORD: ${{ secrets.GESTCOURS_IOS_KEYCHAIN_PASSWORD }}
-
+  migration:
+    runs-on: ubuntu-latest
     steps:
-      - name: Récupérer le projet
-        uses: actions/checkout@v5
-
-      - name: Installer Flutter stable
-        uses: subosito/flutter-action@v2
-        with:
-          channel: stable
-          cache: true
-
-      - name: Vérifier le script de signature
-        shell: bash
-        run: bash -n ci/sign_ios.sh
-
-      - name: Générer la plateforme iOS
-        shell: bash
-        run: |
-          rm -rf ios
-          flutter create --platforms=ios --org fr.ecolegestion --project-name ecole_gestion_prof_mobile .
-          python3 ci/patch_ios.py
-
-      - name: Installer les dépendances
-        run: flutter pub get
-
-      - name: Vérifier le code Flutter
-        run: flutter analyze lib --no-fatal-warnings --no-fatal-infos
-
-      - name: Compiler pour iPhone ARM64 sans signature Apple
-        run: flutter build ios --release --no-codesign
-
-      - name: Vérifier l'application iOS générée
-        shell: bash
-        run: |
-          test -d build/ios/iphoneos/Runner.app
-          /usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" build/ios/iphoneos/Runner.app/Info.plist
-          /usr/libexec/PlistBuddy -c "Print :CFBundleVersion" build/ios/iphoneos/Runner.app/Info.plist
-          /usr/libexec/PlistBuddy -c "Print :NSLocalNetworkUsageDescription" build/ios/iphoneos/Runner.app/Info.plist
-          file build/ios/iphoneos/Runner.app/Runner
-          mkdir -p dist
-          ditto -c -k --sequesterRsrc --keepParent \
-            build/ios/iphoneos/Runner.app \
-            dist/GESTCOURS_PROF_IOS_V0_5_6_UNSIGNED_APP.zip
-
-      - name: Publier le build iOS non signé
-        uses: actions/upload-artifact@v4
-        with:
-          name: GESTCOURS_PROF_IOS_V0_5_6_UNSIGNED_APP
-          path: dist/GESTCOURS_PROF_IOS_V0_5_6_UNSIGNED_APP.zip
-          if-no-files-found: error
-          retention-days: 30
-
-      - name: Signer l'IPA officielle
-        if: ${{ env.IOS_CERTIFICATE_P12_B64 != '' && env.IOS_CERTIFICATE_PASSWORD != '' && env.IOS_PROVISIONING_PROFILE_B64 != '' && env.IOS_KEYCHAIN_PASSWORD != '' }}
-        shell: bash
-        run: |
-          chmod +x ci/sign_ios.sh
-          ci/sign_ios.sh
-
-      - name: Publier l'IPA officielle
-        if: ${{ env.IOS_CERTIFICATE_P12_B64 != '' && env.IOS_CERTIFICATE_PASSWORD != '' && env.IOS_PROVISIONING_PROFILE_B64 != '' && env.IOS_KEYCHAIN_PASSWORD != '' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: GESTCOURS_PROF_IOS_V0_5_6_OFFICIEL
-          path: dist/GESTCOURS_PROF_IOS_V0_5_6_OFFICIEL.ipa
-          if-no-files-found: error
-          retention-days: 30
-
-      - name: Signature Apple non configurée
-        if: ${{ !(env.IOS_CERTIFICATE_P12_B64 != '' && env.IOS_CERTIFICATE_PASSWORD != '' && env.IOS_PROVISIONING_PROFILE_B64 != '' && env.IOS_KEYCHAIN_PASSWORD != '') }}
-        shell: bash
-        run: |
-          echo '### Build iOS V0.5.6 validé — signature Apple absente' >> "$GITHUB_STEP_SUMMARY"
-          echo '' >> "$GITHUB_STEP_SUMMARY"
-          echo 'Le .app ARM64 compile correctement.' >> "$GITHUB_STEP_SUMMARY"
-          echo 'Aucune IPA OFFICIELLE n’est publiée sans certificat Apple et provisioning profile.' >> "$GITHUB_STEP_SUMMARY"
+      - run: echo 'Utilisez GESTCOURS V2.4 - tests et applications. Les IPA non signées nécessitent une signature Apple ou un outil de signature personnelle.'
