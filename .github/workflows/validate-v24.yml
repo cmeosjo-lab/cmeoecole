@@ -85,21 +85,30 @@ jobs:
           sha256sum -c /tmp/source.sha256
           python3 ci/patch_android.py
           flutter pub get --enforce-lockfile
-      - name: Compiler APK universelle et APK ARM64
+      - name: Compiler APK universelle et APK ARM64 avec le même numéro de version
         shell: bash
         run: |
           mkdir -p dist
           flutter build apk --release
           cp build/app/outputs/flutter-apk/app-release.apk dist/GESTCOURS_PROF_ANDROID_V0_6_0_UNIVERSEL_VALIDATION.apk
-          flutter build apk --release --split-per-abi
-          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk dist/GESTCOURS_PROF_ANDROID_V0_6_0_ARM64_VALIDATION.apk
+          flutter build apk --release --target-platform android-arm64
+          cp build/app/outputs/flutter-apk/app-release.apk dist/GESTCOURS_PROF_ANDROID_V0_6_0_ARM64_VALIDATION.apk
       - name: Contrôler les fichiers et conserver l'outil officiel de signature
         shell: bash
         run: |
           BT=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)
           for APK in dist/*.apk; do
             "$BT/apksigner" verify --verbose --print-certs "$APK" >> dist/apk-inspection.txt
-            "$BT/aapt" dump badging "$APK" >> dist/apk-inspection.txt
+            "$BT/aapt" dump badging "$APK" > "$RUNNER_TEMP/badging.txt"
+            grep -q "package: name='fr.ecolegestion.ecole_gestion_prof_mobile' versionCode='14' versionName='0.6.0'" "$RUNNER_TEMP/badging.txt"
+            if grep -q 'application-debuggable' "$RUNNER_TEMP/badging.txt"; then
+              echo 'APK debuggable refusée' >&2
+              exit 1
+            fi
+            if [[ "$APK" == *ARM64* ]]; then
+              grep -q "^native-code: 'arm64-v8a'$" "$RUNNER_TEMP/badging.txt"
+            fi
+            cat "$RUNNER_TEMP/badging.txt" >> dist/apk-inspection.txt
           done
           cp "$BT/lib/apksigner.jar" dist/apksigner.jar
           sha256sum dist/*.apk > dist/SHA256_VALIDATION.txt
