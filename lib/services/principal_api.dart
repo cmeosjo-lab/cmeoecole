@@ -74,14 +74,16 @@ class PrincipalApi {
             },
           )
           .timeout(pairTimeout ?? const Duration(milliseconds: 650));
-      if (r.statusCode == 403)
+      if (r.statusCode == 403) {
         throw PrincipalApiException(
           'Code professeur incorrect ou accès désactivé dans le Principal.',
         );
-      if (r.statusCode != 200 || r.bodyBytes.isEmpty)
+      }
+      if (r.statusCode != 200 || r.bodyBytes.isEmpty) {
         throw PrincipalApiException(
           'Le Principal répond, mais l’appairage a échoué (${r.statusCode}).',
         );
+      }
       final decoded = jsonDecode(utf8.decode(r.bodyBytes));
       if (decoded is! Map) return null;
       final data = Map<String, dynamic>.from(decoded);
@@ -92,12 +94,14 @@ class PrincipalApi {
       final returnedPort =
           int.tryParse((data['port'] ?? port).toString()) ?? port;
       final authorized = data['deviceAuthorized'];
-      if (protocol != supportedProtocol)
+      if (protocol != supportedProtocol) {
         throw PrincipalApiException(
           'Versions incompatibles. Mettez à jour le Principal et le mobile ensemble.',
         );
-      if (!ok || teacher.isEmpty)
+      }
+      if (!ok || teacher.isEmpty) {
         throw PrincipalApiException('Réponse du Principal invalide.');
+      }
       if (authorized == false) {
         throw PrincipalApiException(
           'Cet appareil attend une autorisation ou est désactivé. Sur le Principal : Réseau enseignants > Appareils autorisés.',
@@ -144,8 +148,9 @@ class PrincipalApi {
     }
     final host = parsed.host;
     final port = parsed.hasPort ? parsed.port : defaultPort;
-    if (port < 1 || port > 65535)
+    if (port < 1 || port > 65535) {
       throw PrincipalApiException('Le numéro de port est invalide.');
+    }
     final code = rawCode.trim();
     if (host.isEmpty) {
       throw PrincipalApiException(
@@ -184,8 +189,9 @@ class PrincipalApi {
             },
           )
           .timeout(timeout);
-      if (r.statusCode < 200 || r.statusCode >= 300 || r.bodyBytes.isEmpty)
+      if (r.statusCode < 200 || r.statusCode >= 300 || r.bodyBytes.isEmpty) {
         return null;
+      }
       final decoded = jsonDecode(utf8.decode(r.bodyBytes));
       return decoded is Map ? Map<String, dynamic>.from(decoded) : null;
     } catch (_) {
@@ -224,8 +230,9 @@ class PrincipalApi {
       );
     }
     final decoded = jsonDecode(utf8.decode(r.bodyBytes));
-    if (decoded is! Map)
+    if (decoded is! Map) {
       throw PrincipalApiException('Réponse de synchronisation invalide.');
+    }
     var snapshot = SyncSnapshot.fromJson(Map<String, dynamic>.from(decoded));
     if (snapshot.protocolVersion != 0 &&
         snapshot.protocolVersion != supportedProtocol) {
@@ -234,8 +241,9 @@ class PrincipalApi {
       );
     }
     final references = await _referenceData(c, deviceId);
-    if (references != null && references.isNotEmpty)
+    if (references != null && references.isNotEmpty) {
       snapshot = snapshot.mergeReferenceData(references);
+    }
     return snapshot;
   }
 
@@ -301,10 +309,11 @@ class PrincipalApi {
           },
         )
         .timeout(timeout);
-    if (r.statusCode < 200 || r.statusCode >= 300 || r.bodyBytes.isEmpty)
+    if (r.statusCode < 200 || r.statusCode >= 300 || r.bodyBytes.isEmpty) {
       throw PrincipalApiException(
         'Les décisions du Principal ne sont pas disponibles (${r.statusCode}).',
       );
+    }
     final decoded = jsonDecode(utf8.decode(r.bodyBytes));
     if (decoded is! Map || decoded['items'] is! List) return const {};
     final out = <String, Map<String, String>>{};

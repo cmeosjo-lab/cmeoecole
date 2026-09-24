@@ -46,25 +46,28 @@ class LocalStore extends ChangeNotifier {
       raw == null ? null : PrincipalConfig.fromJson(_object(raw));
   Map<String, dynamic> _object(String raw) {
     final v = jsonDecode(raw);
-    if (v is! Map)
+    if (v is! Map) {
       throw const FormatException(
         'Objet JSON attendu. Données originales conservées.',
       );
+    }
     return Map<String, dynamic>.from(v);
   }
 
   List<TeacherEvent> _decodeEvents(String? raw) {
     if (raw == null || raw.isEmpty) return [];
     final v = jsonDecode(raw);
-    if (v is! List)
+    if (v is! List) {
       throw const FormatException(
         'Liste des saisies illisible. Données originales conservées.',
       );
+    }
     return v.map((item) {
       if (item is! Map) throw const FormatException('Saisie illisible.');
       final e = TeacherEvent.fromJson(Map<String, dynamic>.from(item));
-      if (e.id.isEmpty || e.type.isEmpty)
+      if (e.id.isEmpty || e.type.isEmpty) {
         throw const FormatException('Saisie sans identifiant ou type.');
+      }
       return e;
     }).toList();
   }
@@ -208,8 +211,9 @@ class LocalStore extends ChangeNotifier {
             whereArgs: [oldScope],
           );
           final oldSnapshot = await _get(tx, 'snapshot:$oldScope');
-          if (oldSnapshot != null)
+          if (oldSnapshot != null) {
             await _put(tx, 'snapshot:${cfg.scopeKey}', oldSnapshot);
+          }
         } else {
           final pending =
               Sqflite.firstIntValue(
@@ -219,10 +223,11 @@ class LocalStore extends ChangeNotifier {
                 ),
               ) ??
               0;
-          if (pending > 0)
+          if (pending > 0) {
             throw StateError(
               '$pending saisie(s) non transmises : conservez la connexion précédente.',
             );
+          }
         }
       }
       await _put(tx, 'config', jsonEncode(cfg.toJson()));
@@ -255,10 +260,11 @@ class LocalStore extends ChangeNotifier {
             ),
           ) ??
           0;
-      if (count > 0)
+      if (count > 0) {
         throw StateError(
           '$count saisie(s) restent à envoyer. Synchronisez avant de vous déconnecter.',
         );
+      }
       await tx.delete('meta', where: 'key = ?', whereArgs: ['config']);
     });
     _changed();
@@ -303,15 +309,17 @@ class LocalStore extends ChangeNotifier {
     final d = await _db;
     await d.transaction((tx) async {
       final cfg = _config(await _get(tx, 'config'));
-      if (cfg == null)
+      if (cfg == null) {
         throw StateError('Connectez cet appareil avant de saisir.');
+      }
       for (final e in events) {
         if (e.teacher.trim().toLowerCase() !=
             cfg.teacher.trim().toLowerCase()) {
           throw StateError('Cette saisie appartient à un autre professeur.');
         }
-        if (e.id.isEmpty || e.type.isEmpty)
+        if (e.id.isEmpty || e.type.isEmpty) {
           throw const FormatException('Saisie incomplète.');
+        }
         await _insert(tx, e, cfg.scopeKey, 'pending');
       }
     });
@@ -367,8 +375,9 @@ class LocalStore extends ChangeNotifier {
       for (final e in updates.entries) {
         var status = e.value['status'] ?? 'received';
         if (status == 'pending') status = 'received';
-        if (!const {'received', 'accepted', 'refused'}.contains(status))
+        if (!const {'received', 'accepted', 'refused'}.contains(status)) {
           continue;
+        }
         await tx.update(
           'events',
           {'status': status, 'review_note': e.value['reviewNote'] ?? ''},
@@ -493,8 +502,9 @@ class LocalStore extends ChangeNotifier {
         final value = m['value'] as String;
         if (key == 'device' ||
             key == 'legacy_migrated' ||
-            key == 'legacy_backup')
+            key == 'legacy_backup') {
           continue;
+        }
         if (key == 'config') _config(value);
         if (key.startsWith('snapshot:')) _object(value);
         if (await _get(tx, key) == null) await _put(tx, key, value);

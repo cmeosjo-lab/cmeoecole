@@ -21,8 +21,9 @@ class ReferenceItem {
     final parts = <String>[];
     if (number > 0) parts.add('$number');
     if (arabic.trim().isNotEmpty) parts.add(arabic.trim());
-    if (label.trim().isNotEmpty && label.trim() != arabic.trim())
+    if (label.trim().isNotEmpty && label.trim() != arabic.trim()) {
       parts.add(label.trim());
+    }
     return parts.isEmpty ? id : parts.join(' — ');
   }
 
@@ -33,8 +34,9 @@ class ReferenceItem {
     String pick(List<String> keys) {
       for (final key in keys) {
         final value = json[key];
-        if (value != null && value.toString().trim().isNotEmpty)
+        if (value != null && value.toString().trim().isNotEmpty) {
           return value.toString().trim();
+        }
       }
       return '';
     }

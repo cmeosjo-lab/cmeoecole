@@ -88,12 +88,13 @@ class _RollCallScreenState extends State<RollCallScreen>
       count++;
     }
     if (entries.isEmpty) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Aucune nouvelle saisie à enregistrer.'),
           ),
         );
+      }
       return;
     }
     await widget.store.enqueueMany(entries);

@@ -224,10 +224,11 @@ class _HomeScreenState extends State<HomeScreen> {
         );
       }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Sauvegarde impossible : $e')));
+      }
     }
   }
 
@@ -260,7 +261,7 @@ class _HomeScreenState extends State<HomeScreen> {
       if (raw == null || raw.trim().isEmpty) return;
       await widget.store.importBundle(raw);
       await _refresh();
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text(
@@ -268,11 +269,13 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
         );
+      }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Restauration annulée : $e')));
+      }
     } finally {
       field.dispose();
     }
@@ -325,7 +328,7 @@ class _HomeScreenState extends State<HomeScreen> {
         final fresh = await widget.api.sync(found, deviceId: device);
         await widget.store.activateSession(found, fresh);
       });
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text(
@@ -333,11 +336,13 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
         );
+      }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('Adresse non modifiée : $e')));
+      }
     } finally {
       field.dispose();
     }
@@ -349,10 +354,11 @@ class _HomeScreenState extends State<HomeScreen> {
       await widget.store.clearConfig();
       widget.onDisconnect();
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text(e.toString())));
+      }
     }
   }
 

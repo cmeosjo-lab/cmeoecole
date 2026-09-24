@@ -138,8 +138,9 @@ class _HomeworkScreenState extends State<HomeworkScreen>
         ),
       ),
     );
-    if (result != null && mounted)
+    if (result != null && mounted) {
       setState(() => (learning ? learn : review).add(result));
+    }
   }
 
   Future<void> _save() => saveGuarded(() async {

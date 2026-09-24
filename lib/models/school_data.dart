@@ -19,8 +19,9 @@ class StudentHistoryItem {
     String pick(List<String> keys) {
       for (final key in keys) {
         final value = json[key];
-        if (value != null && value.toString().trim().isNotEmpty)
+        if (value != null && value.toString().trim().isNotEmpty) {
           return value.toString();
+        }
       }
       return '';
     }
@@ -182,8 +183,9 @@ class SyncSnapshot {
     String pick(List<String> keys) {
       for (final key in keys) {
         final value = json[key];
-        if (value != null && value.toString().trim().isNotEmpty)
+        if (value != null && value.toString().trim().isNotEmpty) {
           return value.toString().trim();
+        }
       }
       return '';
     }

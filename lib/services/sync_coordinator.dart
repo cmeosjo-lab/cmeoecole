@@ -28,8 +28,9 @@ class SyncCoordinator extends ChangeNotifier with WidgetsBindingObserver {
 
   void schedule(Duration delay) {
     _timer?.cancel();
-    if (_active && !_disposed && !_maintenance)
+    if (_active && !_disposed && !_maintenance) {
       _timer = Timer(delay, synchronize);
+    }
   }
 
   Future<SyncResult?> synchronize() {

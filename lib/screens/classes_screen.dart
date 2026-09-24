@@ -135,7 +135,7 @@ class ClassStudentsScreen extends StatelessWidget {
                 context: context,
                 delegate: _StudentSearch(students),
               );
-              if (selected != null && context.mounted)
+              if (selected != null && context.mounted) {
                 Navigator.push(
                   context,
                   MaterialPageRoute(
@@ -147,6 +147,7 @@ class ClassStudentsScreen extends StatelessWidget {
                     ),
                   ),
                 );
+              }
             },
           ),
         ],

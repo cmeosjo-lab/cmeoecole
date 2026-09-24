@@ -208,8 +208,9 @@ class _QuranScreenState extends State<QuranScreen> with SafeSave<QuranScreen> {
                           .toList(),
                       onChanged: (v) => setState(() {
                         verseFrom = v;
-                        if (verseTo != null && v != null && verseTo! < v)
+                        if (verseTo != null && v != null && verseTo! < v) {
                           verseTo = v;
+                        }
                       }),
                     ),
                   ),

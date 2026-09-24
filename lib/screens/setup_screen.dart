@@ -78,10 +78,11 @@ class _SetupScreenState extends State<SetupScreen> {
         enteredCode,
         deviceId: deviceId,
       );
-      if (mounted)
+      if (mounted) {
         setState(
           () => status = 'Connexion trouvée. Synchronisation de vos classes…',
         );
+      }
       final snapshot = await widget.api.sync(c, deviceId: deviceId);
       await widget.store.activateSession(c, snapshot);
       if (!mounted) return;
