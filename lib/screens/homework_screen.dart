@@ -38,7 +38,7 @@ class _HomeworkScreenState extends State<HomeworkScreen> with SafeSave<HomeworkS
           DropdownButtonFormField<int>(key:ValueKey('to-${surah!.id}-$from-$to'),initialValue:to,isExpanded:true,decoration:const InputDecoration(labelText:'Dernier verset'),
             items:List.generate(surah!.verseCount-from+1,(i)=>DropdownMenuItem(value:from+i,child:Text('${from+i}'))),onChanged:(v)=>update(()=>to=v??from)),
         ],
-      ])))),
+      ]))),
       actions:[TextButton(onPressed:()=>Navigator.pop(outer),child:const Text('Annuler')),
         FilledButton(onPressed:surah==null?null:()=>Navigator.pop(outer,{'surah':surah!.label,'from':from,'to':to}),child:const Text('Ajouter'))],
     )));
