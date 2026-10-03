@@ -1,0 +1,90 @@
+name: Android V0.6.1 - native verification
+on:
+  workflow_dispatch:
+  push:
+    branches: ['fix/android-sqlite-native-verification']
+permissions:
+  contents: read
+  actions: read
+jobs:
+  native-android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.5'
+          channel: stable
+          cache: true
+      - name: Retrieve the previously compiled exact release APKs
+        uses: actions/download-artifact@v4
+        with:
+          name: GESTCOURS_ANDROID_V0_6_1_SQLITE_FIX
+          run-id: 37144009652
+          github-token: ${{ github.token }}
+          path: dist
+      - name: Confirm native tests use the exact release sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha256sum -c dist/SHA256_VALIDATION.txt
+          python3 - <<'PY'
+          import zipfile, pathlib, hashlib
+          with zipfile.ZipFile('dist/GESTCOURS_MOBILE_V0_6_1_SOURCES.zip') as z:
+              paths = [n for n in z.namelist() if n.startswith('lib/') and not n.endswith('/')]
+              paths += ['pubspec.yaml', 'pubspec.lock']
+              for name in paths:
+                  assert z.read(name) == pathlib.Path(name).read_bytes(), name
+          print('All runtime sources and production dependencies match the compiled release.')
+          PY
+          mkdir -p dist
+          sha256sum lib/main.dart lib/services/local_store.dart pubspec.yaml pubspec.lock > /tmp/runtime.sha256
+          rm -rf android
+          flutter create --no-pub --platforms=android --org fr.ecolegestion --project-name ecole_gestion_prof_mobile .
+          git restore --source=HEAD -- lib test pubspec.yaml pubspec.lock analysis_options.yaml
+          rm -f test/widget_test.dart
+          sha256sum -c /tmp/runtime.sha256
+          python3 ci/patch_android.py
+          flutter pub get --enforce-lockfile
+      - name: Add integration-test tooling without changing release artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('pubspec.yaml')
+          p.write_text(p.read_text().replace('dev_dependencies:\n','dev_dependencies:\n  integration_test:\n    sdk: flutter\n'))
+          PY
+          flutter pub get
+          dart format integration_test
+          flutter analyze integration_test 2>&1 | tee dist/integration-analyze.txt
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Native Android regression and data-preservation tests
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          profile: pixel_2
+          disable-animations: true
+          emulator-boot-timeout: 600
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
+          script: bash -o pipefail -c 'flutter test integration_test/storage_android_test.dart -d emulator-5554 --reporter expanded 2>&1 | tee dist/android-native-tests.txt'
+      - name: Mark successful native validation
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'All tests passed!' dist/android-native-tests.txt
+          git restore --source=HEAD -- pubspec.yaml pubspec.lock
+          git rev-parse HEAD > dist/native-test-commit.txt
+          printf 'Existing 29 Flutter tests, exact release compilation and 6 native Android emulator API 35 tests passed. No user-device or Play Protect approval claimed.\n' > dist/VALIDATION_RESULT.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: GESTCOURS_ANDROID_V0_6_1_NATIVE_VERIFIED
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
