@@ -1,0 +1,117 @@
+name: GESTCOURS Android V0.6.1 - ouverture SQLite
+on:
+  workflow_dispatch:
+  push:
+    branches: ['fix/android-sqlite-startup-v0.6.1']
+permissions:
+  contents: read
+concurrency:
+  group: gestcours-sqlite-hotfix-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  android-fix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.ref_name }}
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.5'
+          channel: stable
+          cache: true
+      - name: Appliquer uniquement le correctif SQLite et conserver les sources exactes
+        shell: bash
+        run: |
+          python3 ci/apply_android_startup_v061.py
+          git config user.name 'GESTCOURS Build'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add lib/services/local_store.dart lib/services/principal_api.dart pubspec.yaml
+          if ! git diff --cached --quiet; then
+            git commit -m 'V0.6.1+15: rawQuery pour busy_timeout Android, sans migration destructive'
+            git push origin HEAD:${GITHUB_REF_NAME}
+          fi
+          mkdir -p dist
+          git rev-parse HEAD > dist/SOURCE_COMMIT.txt
+          git archive --format=zip -o dist/GESTCOURS_MOBILE_V0_6_1_SOURCES.zip HEAD
+      - name: Dépendances de production inchangées
+        run: flutter pub get --enforce-lockfile
+      - name: Analyse stricte et tests existants plus régression
+        shell: bash
+        run: |
+          flutter analyze lib test 2>&1 | tee dist/flutter-analyze.txt
+          flutter test --reporter expanded test 2>&1 | tee dist/flutter-tests.txt
+      - name: Préparer Android sans remplacer les sources
+        shell: bash
+        run: |
+          sha256sum lib/main.dart pubspec.yaml pubspec.lock > /tmp/gestcours-source.sha256
+          rm -rf android
+          flutter create --no-pub --platforms=android --org fr.ecolegestion --project-name ecole_gestion_prof_mobile .
+          git restore --source=HEAD -- lib test pubspec.yaml pubspec.lock analysis_options.yaml
+          rm -f test/widget_test.dart
+          sha256sum -c /tmp/gestcours-source.sha256
+          python3 ci/patch_android.py
+          flutter pub get --enforce-lockfile
+      - name: Compiler les APK release, universelle et ARM64
+        shell: bash
+        run: |
+          flutter build apk --release --no-pub
+          cp build/app/outputs/flutter-apk/app-release.apk dist/GESTCOURS_PROF_ANDROID_V0_6_1_UNIVERSEL_VALIDATION.apk
+          GESTCOURS_ARM64_ONLY=1 flutter build apk --release --target-platform android-arm64 --no-pub
+          cp build/app/outputs/flutter-apk/app-release.apk dist/GESTCOURS_PROF_ANDROID_V0_6_1_ARM64_VALIDATION.apk
+      - name: Vérifier les versions et fournir les outils de contrôle
+        shell: bash
+        run: |
+          BT=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)
+          cp "$BT/lib/apksigner.jar" dist/apksigner.jar
+          cp "$BT/aapt" dist/aapt
+          cp "$BT/zipalign" dist/zipalign
+          for APK in dist/*.apk; do
+            echo "CONTROLE $APK" | tee -a dist/apk-inspection.txt
+            "$BT/apksigner" verify --verbose --print-certs "$APK" | tee -a dist/apk-inspection.txt
+            "$BT/aapt" dump badging "$APK" | tee "$RUNNER_TEMP/badging.txt" | tee -a dist/apk-inspection.txt
+            grep -q "package: name='fr.ecolegestion.ecole_gestion_prof_mobile' versionCode='15' versionName='0.6.1'" "$RUNNER_TEMP/badging.txt"
+            if grep -q 'application-debuggable' "$RUNNER_TEMP/badging.txt"; then exit 1; fi
+            if [[ "$APK" == *ARM64* ]]; then
+              grep -Eq "^native-code: 'arm64-v8a'[[:space:]]*$" "$RUNNER_TEMP/badging.txt"
+            fi
+          done
+          sha256sum dist/*.apk > dist/SHA256_VALIDATION.txt
+      - name: Activer KVM pour le test Android natif
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Préparer uniquement les dépendances du banc de test Android
+        shell: bash
+        run: |
+          flutter pub add --dev integration_test --sdk=flutter
+          flutter analyze integration_test
+      - name: Reproduire le défaut et vérifier la réparation sur Android natif
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          disable-animations: true
+          emulator-boot-timeout: 600
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: |
+            bash ci/android_startup_smoke.sh
+            bash -o pipefail -c 'flutter test integration_test/sqlite_startup_test.dart -d emulator-5554 --reporter expanded 2>&1 | tee dist/android-native-tests.txt'
+      - name: Restaurer le manifeste de production et vérifier son intégrité
+        if: always()
+        shell: bash
+        run: |
+          git restore --source=HEAD -- pubspec.yaml pubspec.lock
+          git diff --exit-code HEAD -- lib pubspec.yaml pubspec.lock
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: GESTCOURS_ANDROID_V0_6_1_CORRECTIF_ET_PREUVES
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
