@@ -84,7 +84,9 @@ class LocalStore extends ChangeNotifier {
           await db.execute('PRAGMA foreign_keys = ON');
           await db.rawQuery('PRAGMA journal_mode = WAL');
           await db.execute('PRAGMA synchronous = FULL');
-          await db.execute('PRAGMA busy_timeout = 5000');
+          // busy_timeout returns a row, even when setting the value.
+          // Android requires rawQuery for statements returning results.
+          await db.rawQuery('PRAGMA busy_timeout = 5000');
         },
         onCreate: (db, _) async {
           await db.execute(
