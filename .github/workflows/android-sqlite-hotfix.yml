@@ -1,0 +1,117 @@
+name: Android V0.6.1 - SQLite startup regression
+on:
+  workflow_dispatch:
+  push:
+    branches: ['fix/android-sqlite-v0.6.1']
+permissions:
+  contents: write
+concurrency:
+  group: sqlite-hotfix-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.sha }}
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.5'
+          channel: stable
+          cache: true
+      - name: Apply the exact reviewed fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = 'fix/android-sqlite-v0.6.1'
+          python3 ci/apply_android_sqlite_hotfix.py
+          git diff -- lib pubspec.yaml > dist/runtime.patch
+          git config user.name 'GESTCOURS Build'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add lib/services/local_store.dart lib/services/principal_api.dart pubspec.yaml
+          if ! git diff --cached --quiet; then
+            git commit -m 'Fix Android busy_timeout with rawQuery; V0.6.1+15, database schema unchanged'
+            git push origin HEAD:refs/heads/fix/android-sqlite-v0.6.1
+          fi
+          git rev-parse HEAD > dist/source-commit.txt
+          git archive --format=zip -o dist/GESTCOURS_MOBILE_V0_6_1_SOURCES.zip HEAD
+      - name: Keep the production dependency lock and run existing tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          flutter pub get --enforce-lockfile
+          flutter analyze lib test 2>&1 | tee dist/flutter-analyze.txt
+          flutter test test --reporter expanded 2>&1 | tee dist/flutter-tests.txt
+      - name: Prepare Android without replacing verified sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          sha256sum lib/main.dart lib/services/local_store.dart pubspec.yaml pubspec.lock > /tmp/runtime.sha256
+          rm -rf android
+          flutter create --no-pub --platforms=android --org fr.ecolegestion --project-name ecole_gestion_prof_mobile .
+          git restore --source=HEAD -- lib test pubspec.yaml pubspec.lock analysis_options.yaml
+          rm -f test/widget_test.dart
+          sha256sum -c /tmp/runtime.sha256
+          python3 ci/patch_android.py
+          flutter pub get --enforce-lockfile
+      - name: Build production APKs with unchanged features
+        shell: bash
+        run: |
+          set -euo pipefail
+          flutter build apk --release --no-pub
+          cp build/app/outputs/flutter-apk/app-release.apk dist/GESTCOURS_PROF_ANDROID_V0_6_1_UNIVERSEL_VALIDATION.apk
+          GESTCOURS_ARM64_ONLY=1 flutter build apk --release --no-pub --target-platform android-arm64
+          cp build/app/outputs/flutter-apk/app-release.apk dist/GESTCOURS_PROF_ANDROID_V0_6_1_ARM64_VALIDATION.apk
+          BT=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)
+          cp "$BT/lib/apksigner.jar" dist/apksigner.jar
+          for APK in dist/*.apk; do
+            "$BT/apksigner" verify --verbose --print-certs "$APK" >> dist/apk-inspection.txt
+            "$BT/aapt" dump badging "$APK" > "$RUNNER_TEMP/badging.txt"
+            grep -q "package: name='fr.ecolegestion.ecole_gestion_prof_mobile' versionCode='15' versionName='0.6.1'" "$RUNNER_TEMP/badging.txt"
+            if grep -q application-debuggable "$RUNNER_TEMP/badging.txt"; then exit 1; fi
+            if [[ "$APK" == *ARM64* ]]; then grep -Eq "^native-code: 'arm64-v8a'[[:space:]]*$" "$RUNNER_TEMP/badging.txt"; fi
+            cat "$RUNNER_TEMP/badging.txt" >> dist/apk-inspection.txt
+          done
+          sha256sum dist/*.apk > dist/SHA256_VALIDATION.txt
+      - name: Prepare integration test dependency only after release compilation
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('pubspec.yaml')
+          p.write_text(p.read_text().replace('dev_dependencies:\n','dev_dependencies:\n  integration_test:\n    sdk: flutter\n'))
+          PY
+          flutter pub get
+          dart format integration_test
+          flutter analyze integration_test 2>&1 | tee dist/integration-analyze.txt
+      - name: Enable emulator acceleration
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Native Android regression and preservation tests
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          profile: pixel_2
+          disable-animations: true
+          emulator-boot-timeout: 600
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
+          script: |
+            set -o pipefail
+            flutter test integration_test/storage_android_test.dart -d emulator-5554 --reporter expanded 2>&1 | tee dist/android-native-tests.txt
+      - name: Restore production dependencies and mark successful validation
+        run: |
+          git restore --source=HEAD -- pubspec.yaml pubspec.lock
+          printf 'Existing Flutter tests, production compilation and native Android regression tests passed. Not tested on user hardware; no Play Protect approval claimed.\n' > dist/VALIDATION_RESULT.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: GESTCOURS_ANDROID_V0_6_1_SQLITE_FIX
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
