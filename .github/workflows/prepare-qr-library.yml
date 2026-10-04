@@ -1,0 +1,30 @@
+name: Préparer QR local
+on:
+  push:
+    branches: ['release/v0.6.2-simple-connection']
+    paths: ['.github/workflows/prepare-qr-library.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  library:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.2'
+      - name: Préparer les sources publiques et leur licence
+        shell: bash
+        run: |
+          mkdir qrlib && cd qrlib
+          go mod init gestcours/principal
+          printf 'package main\nimport _ "github.com/skip2/go-qrcode"\nfunc main() {}\n' > main.go
+          go get github.com/skip2/go-qrcode@v0.0.0-20200617195104-da1b6568686e
+          go mod vendor
+          go test ./...
+          rm main.go
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GESTCOURS_QR_LIBRARY_VENDOR
+          path: qrlib/
+          retention-days: 30
