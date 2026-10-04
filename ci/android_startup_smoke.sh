@@ -2,7 +2,7 @@
 set -euo pipefail
 # This runs only on a fresh CI emulator, not a user's phone.
 PACKAGE=fr.ecolegestion.ecole_gestion_prof_mobile
-APK=dist/GESTCOURS_PROF_ANDROID_V0_6_1_UNIVERSEL_VALIDATION.apk
+APK=dist/GESTCOURS_PROF_ANDROID_V0_6_2_UNIVERSEL_VALIDATION.apk
 adb install -r "$APK"
 adb shell am start -W -n "$PACKAGE/.MainActivity"
 sleep 6

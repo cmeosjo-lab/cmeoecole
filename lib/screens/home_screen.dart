@@ -7,6 +7,7 @@ import '../services/principal_api.dart';
 import '../services/sync_coordinator.dart';
 import '../widgets/school_header.dart';
 import 'classes_screen.dart';
+import 'transmission_history_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   final PrincipalConfig config;
@@ -28,7 +29,6 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   SyncSnapshot? snapshot;
-  PrincipalConfig? actualConfig;
   DateTime? lastSync;
   int pending = 0, received = 0, accepted = 0, refused = 0, _generation = 0;
   String? localError;
@@ -54,14 +54,12 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _refresh() async {
     final generation = ++_generation;
     try {
-      final config = await widget.store.loadConfig();
       final s = await widget.store.loadSnapshot();
       final q = await widget.store.loadQueue();
-      final h = await widget.store.loadTransmissionHistory();
+      final h = await widget.store.loadDashboardHistory();
       final last = await widget.store.lastSuccessfulSync();
       if (!mounted || generation != _generation) return;
       setState(() {
-        actualConfig = config;
         snapshot = s;
         pending = q.length;
         lastSync = last;
@@ -83,100 +81,18 @@ class _HomeScreenState extends State<HomeScreen> {
   String _when(DateTime? d) => d == null
       ? 'Pas encore effectuée'
       : '${d.toLocal().day.toString().padLeft(2, '0')}/${d.toLocal().month.toString().padLeft(2, '0')} à ${d.toLocal().hour.toString().padLeft(2, '0')}:${d.toLocal().minute.toString().padLeft(2, '0')}';
-  String _label(String s) =>
-      const {
-        'pending': 'À envoyer',
-        'received': 'Reçu par le Principal',
-        'accepted': 'Validé',
-        'refused': 'Refusé',
-      }[s] ??
-      s;
   Future<void> _history() async {
-    final q = await widget.store.loadQueue();
-    final h = await widget.store.loadTransmissionHistory();
-    final all = [...q, ...h]
-      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
-    if (!mounted) return;
-    var filter = 'all';
-    await showDialog<void>(
-      context: context,
-      builder: (dialogContext) => StatefulBuilder(
-        builder: (context, update) {
-          final items = all
-              .where((e) => filter == 'all' || e.status == filter)
-              .toList();
-          return AlertDialog(
-            title: const Text('Suivi des saisies'),
-            content: SizedBox(
-              width: 640,
-              height: MediaQuery.sizeOf(context).height * .6,
-              child: Column(
-                children: [
-                  DropdownButton<String>(
-                    value: filter,
-                    isExpanded: true,
-                    items: ['all', 'pending', 'received', 'accepted', 'refused']
-                        .map(
-                          (s) => DropdownMenuItem(
-                            value: s,
-                            child: Text(
-                              s == 'all' ? 'Toutes les saisies' : _label(s),
-                            ),
-                          ),
-                        )
-                        .toList(),
-                    onChanged: (s) => update(() => filter = s ?? 'all'),
-                  ),
-                  Expanded(
-                    child: items.isEmpty
-                        ? const Center(
-                            child: Text('Aucune saisie dans cette catégorie.'),
-                          )
-                        : ListView.builder(
-                            itemCount: items.length,
-                            itemBuilder: (context, i) {
-                              final e = items[i];
-                              final matching = snapshot?.students.where(
-                                (s) => s.id == e.studentId,
-                              );
-                              final student =
-                                  matching != null && matching.isNotEmpty
-                                  ? matching.first.displayName
-                                  : e.studentId.isEmpty
-                                  ? 'Toute la classe'
-                                  : 'Élève archivé';
-                              final note = (e.payload['_reviewNote'] ?? '')
-                                  .toString();
-                              return ListTile(
-                                contentPadding: EdgeInsets.zero,
-                                leading: Icon(
-                                  e.status == 'refused'
-                                      ? Icons.error_outline
-                                      : e.status == 'accepted'
-                                      ? Icons.verified_outlined
-                                      : Icons.schedule,
-                                ),
-                                title: Text('$student — ${e.displayType}'),
-                                subtitle: Text(
-                                  '${_label(e.status)} · ${_when(e.createdAt)}${note.isEmpty ? '' : '\nMotif : $note'}',
-                                ),
-                              );
-                            },
-                          ),
-                  ),
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(dialogContext),
-                child: const Text('Fermer'),
-              ),
-            ],
-          );
-        },
+    await Navigator.push(
+      context,
+      MaterialPageRoute<void>(
+        builder: (_) => TransmissionHistoryScreen(
+          store: widget.store,
+          coordinator: widget.coordinator,
+          snapshot: snapshot,
+        ),
       ),
     );
+    await _refresh();
   }
 
   Future<void> _log() async {
@@ -523,27 +439,6 @@ class _HomeScreenState extends State<HomeScreen> {
                 onPressed: c.busy ? null : _sync,
                 icon: const Icon(Icons.sync),
                 label: const Text('Synchroniser maintenant'),
-              ),
-              const SizedBox(height: 16),
-              const Text(
-                'Envoi automatique après vos saisies et au retour dans l’application. Le PC Principal doit rester ouvert sur le même réseau local.',
-              ),
-              const SizedBox(height: 14),
-              ExpansionTile(
-                title: const Text('Informations techniques'),
-                children: [
-                  ListTile(
-                    title: const Text('GESTCOURS Mobile V0.6.0 · Pack V2.4'),
-                    subtitle: Text(
-                      'Connexion : ${actualConfig?.host ?? widget.config.host}:${actualConfig?.port ?? widget.config.port}\nStockage local transactionnel SQLite',
-                    ),
-                  ),
-                  ListTile(
-                    title: const Text('Ouvrir le diagnostic'),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: _log,
-                  ),
-                ],
               ),
               const SizedBox(height: 30),
             ],

@@ -1,7 +1,9 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import '../models/principal_config.dart';
+import '../models/connection_qr.dart';
 import '../services/local_store.dart';
 import '../services/principal_api.dart';
 import '../services/platform_permissions.dart';
@@ -23,7 +25,11 @@ class SetupScreen extends StatefulWidget {
 class _SetupScreenState extends State<SetupScreen> {
   final host = TextEditingController();
   final code = TextEditingController();
-  bool busy = false;
+  bool busy = false, waiting = false;
+  int _attempt = 0;
+  String _qrPrincipalId = '';
+  Timer? _retry;
+  Completer<void>? _retryWait;
   String? error;
   String status =
       'Recopiez l’adresse affichée dans GESTCOURS Principal, puis votre code professeur.';
@@ -41,59 +47,99 @@ class _SetupScreenState extends State<SetupScreen> {
     code.text = previous.code;
   }
 
+  void _cancelWaiting() {
+    _attempt++;
+    _retry?.cancel();
+    if (_retryWait != null && !_retryWait!.isCompleted) _retryWait!.complete();
+    if (mounted)
+      setState(() {
+        busy = false;
+        waiting = false;
+        status =
+            'Vous pouvez relancer la connexion lorsque le responsable est prêt.';
+      });
+  }
+
   Future<void> connect() async {
+    if (busy) return;
     FocusScope.of(context).unfocus();
     final enteredHost = host.text.trim();
     final enteredCode = code.text.trim();
     if (enteredHost.isEmpty) {
-      setState(() => error = 'Saisissez l’adresse du PC Principal.');
+      setState(
+        () => error =
+            'Saisissez l’adresse du PC Principal ou scannez son QR code.',
+      );
       return;
     }
     if (!RegExp(r'^\d{6}$').hasMatch(enteredCode)) {
       setState(() => error = 'Saisissez le code professeur à 6 chiffres.');
       return;
     }
+    final attempt = ++_attempt;
+    bool active() => mounted && attempt == _attempt;
     setState(() {
       busy = true;
+      waiting = false;
       error = null;
-      status = 'Connexion à GESTCOURS Principal…';
+      status = 'Connexion au Principal…';
     });
-
-    final lanPermission = await PlatformPermissions.ensureLocalNetwork();
-    if (!lanPermission.mayProceed) {
-      if (mounted) {
+    try {
+      final permission = await PlatformPermissions.ensureLocalNetwork();
+      if (!active()) return;
+      if (!permission.mayProceed)
+        throw PrincipalApiException(permission.message);
+      final deviceId = await widget.store.getOrCreateDeviceId();
+      final deadline = DateTime.now().add(const Duration(minutes: 2));
+      while (active()) {
+        try {
+          final c = await widget.api.pairAddress(
+            enteredHost,
+            enteredCode,
+            deviceId: deviceId,
+            expectedPrincipalId: _qrPrincipalId,
+          );
+          if (!active()) return;
+          setState(() {
+            waiting = false;
+            status = 'Autorisation reçue. Chargement de vos classes…';
+          });
+          final snapshot = await widget.api.sync(c, deviceId: deviceId);
+          if (!active()) return;
+          await widget.store.activateSession(c, snapshot);
+          if (active()) widget.onConnected(c);
+          return;
+        } on PairingPendingException {
+          if (!active()) return;
+          if (DateTime.now().isAfter(deadline)) {
+            throw PrincipalApiException(
+              'La demande reste en attente sur le Principal. Relancez la connexion après son acceptation.',
+            );
+          }
+          setState(() {
+            waiting = true;
+            status =
+                'Demande envoyée. Le responsable doit l’accepter sur le tableau de bord du Principal.';
+          });
+          _retryWait = Completer<void>();
+          _retry = Timer(const Duration(seconds: 4), () {
+            if (!_retryWait!.isCompleted) _retryWait!.complete();
+          });
+          await _retryWait!.future;
+        }
+      }
+    } catch (e) {
+      if (active())
+        setState(() {
+          error = e.toString();
+          status = 'Connexion non établie.';
+        });
+    } finally {
+      if (active())
         setState(() {
           busy = false;
-          error = lanPermission.message;
-          status = 'Autorisation réseau local nécessaire.';
+          waiting = false;
         });
-      }
-      return;
-    }
-
-    try {
-      final deviceId = await widget.store.getOrCreateDeviceId();
-      final c = await widget.api.pairAddress(
-        enteredHost,
-        enteredCode,
-        deviceId: deviceId,
-      );
-      if (mounted) {
-        setState(
-          () => status = 'Connexion trouvée. Synchronisation de vos classes…',
-        );
-      }
-      final snapshot = await widget.api.sync(c, deviceId: deviceId);
-      await widget.store.activateSession(c, snapshot);
-      if (!mounted) return;
-      widget.onConnected(c);
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        busy = false;
-        error = e.toString();
-        status = 'Connexion non établie.';
-      });
     }
   }
 
@@ -103,28 +149,22 @@ class _SetupScreenState extends State<SetupScreen> {
     ).push<String>(MaterialPageRoute(builder: (_) => const _QrScanner()));
     if (result == null || !mounted) return;
     try {
-      final value = result.trim();
-      final p = value.split('|');
-      if (p.length == 5 && p[0] == 'ECOLEPRO') {
-        host.text = p[1].trim();
-        code.text = p[4].trim();
-        await connect();
-        return;
-      }
-      if (p.length >= 3 && p[0] == 'GESTCOURS') {
-        host.text = p[1].trim();
-        code.text = p[2].trim();
-        await connect();
-        return;
-      }
-      setState(() => error = 'QR GESTCOURS non reconnu.');
-    } catch (_) {
-      setState(() => error = 'QR GESTCOURS non reconnu.');
+      final qr = ConnectionQr.parse(result);
+      host.text = qr.address;
+      code.text = qr.code;
+      _qrPrincipalId = qr.principalId;
+    } on FormatException catch (e) {
+      setState(() => error = e.message);
+      return;
     }
+    await connect();
   }
 
   @override
   void dispose() {
+    _attempt++;
+    _retry?.cancel();
+    if (_retryWait != null && !_retryWait!.isCompleted) _retryWait!.complete();
     host.dispose();
     code.dispose();
     super.dispose();
@@ -215,6 +255,7 @@ class _SetupScreenState extends State<SetupScreen> {
                       const SizedBox(height: 22),
                       TextField(
                         controller: host,
+                        onChanged: (_) => _qrPrincipalId = '',
                         enabled: !busy,
                         keyboardType: TextInputType.url,
                         decoration: const InputDecoration(
@@ -308,11 +349,13 @@ class _SetupScreenState extends State<SetupScreen> {
                         icon: const Icon(Icons.qr_code_scanner),
                         label: const Text('Scanner un QR GESTCOURS (option)'),
                       ),
-                      const SizedBox(height: 14),
-                      const Text(
-                        'L’adresse à recopier est affichée dans Principal > Réseau enseignants. Le port et votre nom ne sont pas à saisir.',
-                        textAlign: TextAlign.center,
-                      ),
+                      if (waiting) ...[
+                        const SizedBox(height: 8),
+                        TextButton(
+                          onPressed: _cancelWaiting,
+                          child: const Text('Arrêter l’attente'),
+                        ),
+                      ],
                     ],
                   ),
                 ),

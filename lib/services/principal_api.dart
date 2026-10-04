@@ -13,10 +13,18 @@ class PrincipalApiException implements Exception {
   String toString() => message;
 }
 
+class PairingPendingException extends PrincipalApiException {
+  final PrincipalConfig config;
+  PairingPendingException(this.config)
+    : super(
+        'Demande envoyée. Attendez l’accord du responsable sur le Principal.',
+      );
+}
+
 class PrincipalApi {
   static const int supportedProtocol = 6;
   static const int defaultPort = 47831;
-  static const String mobileVersion = '0.6.1';
+  static const String mobileVersion = '0.6.2';
   final Duration timeout;
 
   const PrincipalApi({this.timeout = const Duration(seconds: 8)});
@@ -56,11 +64,14 @@ class PrincipalApi {
     required String deviceId,
     int port = defaultPort,
     Duration? pairTimeout,
+    String expectedPrincipalId = '',
   }) async {
     try {
       final uri = Uri.parse('http://$host:$port/api/v1/pair').replace(
         queryParameters: {
           'code': code,
+          if (expectedPrincipalId.isNotEmpty)
+            'principalId': expectedPrincipalId,
           if (deviceId.trim().isNotEmpty) 'deviceId': deviceId.trim(),
           if (deviceId.trim().isNotEmpty) 'deviceName': deviceName,
         },
@@ -102,18 +113,34 @@ class PrincipalApi {
       if (!ok || teacher.isEmpty) {
         throw PrincipalApiException('Réponse du Principal invalide.');
       }
-      if (authorized == false) {
-        throw PrincipalApiException(
-          'Cet appareil attend une autorisation ou est désactivé. Sur le Principal : Réseau enseignants > Appareils autorisés.',
-        );
-      }
-      return PrincipalConfig(
+      final found = PrincipalConfig(
         host: host,
         port: returnedPort,
         teacher: teacher,
         code: code,
         principalId: (data['principalId'] ?? '').toString(),
       );
+      if (expectedPrincipalId.isNotEmpty &&
+          found.principalId != expectedPrincipalId) {
+        throw PrincipalApiException(
+          'Ce QR ne correspond plus à ce Principal. Demandez un nouveau QR code.',
+        );
+      }
+      if (authorized == false) {
+        final state = (data['deviceStatus'] ?? 'pending').toString();
+        if (state == 'refused') {
+          throw PrincipalApiException(
+            'Le responsable a refusé cette demande. Contactez-le avant de réessayer.',
+          );
+        }
+        if (state == 'disabled') {
+          throw PrincipalApiException(
+            'Cet appareil est désactivé. Demandez au responsable de le réactiver.',
+          );
+        }
+        throw PairingPendingException(found);
+      }
+      return found;
     } on PrincipalApiException {
       rethrow;
     } on TimeoutException {
@@ -135,6 +162,7 @@ class PrincipalApi {
     String rawHost,
     String rawCode, {
     required String deviceId,
+    String expectedPrincipalId = '',
   }) async {
     final raw = rawHost.trim();
     final parsed = Uri.tryParse(raw.contains('://') ? raw : 'http://$raw');
@@ -166,6 +194,7 @@ class PrincipalApi {
       deviceId: deviceId,
       port: port,
       pairTimeout: const Duration(seconds: 3),
+      expectedPrincipalId: expectedPrincipalId,
     );
     if (found == null) {
       throw PrincipalApiException(

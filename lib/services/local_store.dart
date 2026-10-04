@@ -306,6 +306,48 @@ class LocalStore extends ChangeNotifier {
     return rows.map(_event).toList();
   }
 
+  /// A reset archives the display, never the sending queue or the original records.
+  /// A new decision becomes visible when the event status changes after the reset.
+  Future<List<TeacherEvent>> loadDashboardHistory() async {
+    final d = await _db;
+    return d.transaction((tx) async {
+      final scope = await _scope(tx);
+      final raw = await _get(tx, 'tracking_hidden:$scope');
+      final hidden = raw == null ? <String, dynamic>{} : _object(raw);
+      final rows = await tx.query(
+        'events',
+        where: "scope = ? AND status != 'pending'",
+        whereArgs: [scope],
+        orderBy: 'created_at, id',
+      );
+      return rows
+          .where((r) => hidden[r['id']] != r['status'])
+          .map(_event)
+          .toList();
+    });
+  }
+
+  Future<int> resetTransmissionDashboard() async {
+    final d = await _db;
+    final count = await d.transaction((tx) async {
+      final scope = await _scope(tx);
+      final rows = await tx.query(
+        'events',
+        columns: ['id', 'status'],
+        where: "scope = ? AND status != 'pending'",
+        whereArgs: [scope],
+      );
+      await _put(
+        tx,
+        'tracking_hidden:$scope',
+        jsonEncode({for (final r in rows) r['id'] as String: r['status']}),
+      );
+      return rows.length;
+    });
+    _changed();
+    return count;
+  }
+
   Future<void> enqueue(TeacherEvent event) => enqueueMany([event]);
   Future<void> enqueueMany(List<TeacherEvent> events) async {
     final d = await _db;
