@@ -5,6 +5,9 @@ on:
     branches: ['release/v0.6.2-connexion-suivi']
 permissions:
   contents: read
+defaults:
+  run:
+    shell: bash
 concurrency:
   group: gestcours-v062-${{ github.ref }}
   cancel-in-progress: false
@@ -27,11 +30,13 @@ jobs:
           cache: true
       - name: Préparer et contrôler les sources
         run: |
+          mkdir -p dist
           python3 ci/prepare_v062.py
           flutter pub get --enforce-lockfile
-          dart fix --apply lib test
+          dart fix --apply lib
+          dart fix --apply test
           dart format lib test integration_test
-          mkdir -p dist
+          zip -qr dist/prepared-source-inspection.zip lib test integration_test pubspec.yaml pubspec.lock
           flutter analyze lib test 2>&1 | tee dist/analyse.txt
           flutter test test --reporter expanded 2>&1 | tee dist/tests.txt
       - name: Enregistrer les sources vérifiées
