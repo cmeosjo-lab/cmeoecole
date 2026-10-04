@@ -1,24 +1,16 @@
-"""Validate committed sources and keep native HTTP checks outside widget mocks."""
+"""Validate committed V0.6.2 sources and finish user-facing message cleanup."""
 from pathlib import Path
 import subprocess
 assert 'version: 0.6.2+16' in Path('pubspec.yaml').read_text()
 assert "rawQuery('PRAGMA busy_timeout = 5000')" in Path('lib/services/local_store.dart').read_text()
 assert 'resetDashboardCounters' in Path('lib/services/local_store.dart').read_text()
-# Flutter widget tests replace HttpClient with an unconditional HTTP 400 mock.
-# The loopback protocol test deliberately uses real HTTP, in a separate test
-# isolate without TestWidgetsFlutterBinding. No application code is changed.
-p = Path('test/simple_connection_test.dart')
-s = p.read_text()
-marker = "  test(\n    'pairing waits for admin and distinguishes refusal without authorizing',"
-if marker in s:
-    start = s.index(marker)
-    end = s.index("  testWidgets('QR entry", start)
-    block = s[start:end]
-    target = Path('test/pairing_network_test.dart')
-    if target.exists():
-        raise RuntimeError('Refuse to overwrite an existing protocol test')
-    target.write_text("import 'dart:convert';\nimport 'dart:io';\nimport 'package:flutter_test/flutter_test.dart';\nimport 'package:ecole_gestion_prof_mobile/services/principal_api.dart';\n\nvoid main() {\n" + block + "}\n")
-    p.write_text(s[:start] + s[end:])
+assert Path('test/pairing_network_test.dart').exists()
+p=Path('lib/screens/home_screen.dart')
+s=p.read_text().replace("Text('Adresse non modifiée : $e')", "Text('Adresse non modifiée. ${friendlyMessage(e)}')")
+p.write_text(s)
+p=Path('lib/services/friendly_message.dart')
+s=p.read_text().replace(r'HTTP|https?://|SocketException|DatabaseException|PRAGMA', r'HTTP|https?://|SocketException|DatabaseException|PRAGMA|\(\d{3}\)|<!?\w|protocole')
+p.write_text(s)
 subprocess.run(['flutter','pub','get','--enforce-lockfile'],check=True)
 subprocess.run(['dart','fix','--apply','lib'],check=True)
-print('V0.6.2 : données, schéma et dépendances inchangés ; tests HTTP et widgets isolés.')
+print('V0.6.2 : messages simplifiés ; données, schéma et dépendances inchangés.')
