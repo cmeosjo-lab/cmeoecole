@@ -11,8 +11,9 @@ class ConnectionQr {
     final value = raw.trim();
     if (value.startsWith('{')) {
       final data = jsonDecode(value);
-      if (data is! Map || data['app'] != 'GESTCOURS' || data['v'] != 1)
+      if (data is! Map || data['app'] != 'GESTCOURS' || data['v'] != 1) {
         throw const FormatException('QR inconnu');
+      }
       host = (data['host'] ?? '').toString();
       code = (data['code'] ?? '').toString();
       port = int.tryParse((data['port'] ?? '').toString()) ?? 0;
@@ -32,8 +33,9 @@ class ConnectionQr {
             u.userInfo.isNotEmpty ||
             (u.path.isNotEmpty && u.path != '/') ||
             u.hasQuery ||
-            u.hasFragment)
+            u.hasFragment) {
           throw const FormatException('Adresse QR invalide');
+        }
         host = u.host;
         port = u.hasPort ? u.port : 47831;
         code = parts[2];
@@ -44,8 +46,9 @@ class ConnectionQr {
     if (!RegExp(r'^[a-zA-Z0-9][a-zA-Z0-9.\-]*$').hasMatch(host) ||
         port < 1 ||
         port > 65535 ||
-        !RegExp(r'^\d{6}$').hasMatch(code))
+        !RegExp(r'^\d{6}$').hasMatch(code)) {
       throw const FormatException('QR de connexion incomplet');
+    }
     return ConnectionQr('$host:$port', code, principalId);
   }
 }

@@ -8,8 +8,9 @@ String friendlyMessage(Object error) {
       !RegExp(
         r'HTTP|https?://|SocketException|DatabaseException|PRAGMA',
         caseSensitive: false,
-      ).hasMatch(text))
+      ).hasMatch(text)) {
     return text;
+  }
   if (error is TimeoutException ||
       error is SocketException ||
       RegExp(
@@ -28,21 +29,24 @@ String friendlyMessage(Object error) {
       RegExp(
         r'FormatException|Unexpected character',
         caseSensitive: false,
-      ).hasMatch(text))
+      ).hasMatch(text)) {
     return 'Les informations reçues sont illisibles. Réessayez ou contactez le responsable.';
+  }
   if (error is StateError) {
     final clean = error.message.toString();
     if (!RegExp(
       r'JSON|sqlite|Exception|\bSELECT\b|\bINSERT\b',
       caseSensitive: false,
-    ).hasMatch(clean))
+    ).hasMatch(clean)) {
       return clean;
+    }
   }
   if (RegExp(
         r'code professeur|appareil|désactivé|autorisation|Versions incompatibles|établissement|Réseau local|Wi-Fi',
         caseSensitive: false,
       ).hasMatch(text) &&
-      !text.contains('://'))
+      !text.contains('://')) {
     return text;
+  }
   return 'L’opération n’a pas abouti. Vos saisies sont conservées. Réessayez ou contactez le responsable.';
 }

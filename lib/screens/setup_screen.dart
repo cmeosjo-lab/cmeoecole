@@ -102,10 +102,11 @@ class _SetupScreenState extends State<SetupScreen> {
             status =
                 'Demande envoyée. En attente de l’accord du responsable sur le Principal…';
           });
-          if (DateTime.now().isAfter(deadline))
+          if (DateTime.now().isAfter(deadline)) {
             throw PrincipalApiException(
               'L’accord n’a pas encore été donné. Relancez la connexion après l’acceptation sur le Principal.',
             );
+          }
           await Future.any([
             Future<void>.delayed(const Duration(seconds: 3)),
             _cancel!.future,
@@ -115,10 +116,11 @@ class _SetupScreenState extends State<SetupScreen> {
       if (!mounted || attempt != _attempt || approved == null) return;
       final c = approved;
       if (_expectedPrincipalId.isNotEmpty &&
-          c.principalId != _expectedPrincipalId)
+          c.principalId != _expectedPrincipalId) {
         throw PrincipalApiException(
           'Ce QR ne correspond plus au Principal. Demandez un nouveau QR au responsable.',
         );
+      }
       if (mounted) {
         setState(() {
           waiting = false;

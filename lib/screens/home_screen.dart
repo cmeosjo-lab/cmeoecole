@@ -209,7 +209,7 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       await widget.store.resetDashboardCounters();
       await _refresh();
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text(
@@ -217,11 +217,13 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
         );
+      }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text(friendlyMessage(e))));
+      }
     }
   }
 

@@ -213,8 +213,9 @@ class LocalStore extends ChangeNotifier {
             whereArgs: [oldScope],
           );
           final oldSeen = await _get(tx, 'dashboard_seen:$oldScope');
-          if (oldSeen != null)
+          if (oldSeen != null) {
             await _put(tx, 'dashboard_seen:${cfg.scopeKey}', oldSeen);
+          }
           final oldSnapshot = await _get(tx, 'snapshot:$oldScope');
           if (oldSnapshot != null) {
             await _put(tx, 'snapshot:${cfg.scopeKey}', oldSnapshot);
