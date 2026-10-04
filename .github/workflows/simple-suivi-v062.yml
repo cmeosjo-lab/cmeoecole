@@ -9,16 +9,6 @@ concurrency:
   group: gestcours-v062-${{ github.ref }}
   cancel-in-progress: false
 jobs:
-  qr-library:
-    runs-on: ubuntu-latest
-    steps:
-      - run: |
-          mkdir -p dist
-          curl --fail --location --retry 3 'https://proxy.golang.org/github.com/skip2/go-qrcode/@v/v0.0.0-20200617195104-da1b6568686e.zip' -o dist/qrcode-library.zip
-      - uses: actions/upload-artifact@v4
-        with:
-          name: QR_ENCODER_SOURCE_LICENSE
-          path: dist/
   validate:
     runs-on: ubuntu-latest
     permissions:
@@ -39,6 +29,7 @@ jobs:
           python3 ci/apply_user_v062.py
           python3 ci/native_suivi_v062.py
           flutter pub get --enforce-lockfile
+          dart fix --apply lib
           dart format lib test integration_test
       - id: source
         name: Conserver les sources exactes
@@ -48,7 +39,7 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add lib test integration_test pubspec.yaml
           if ! git diff --cached --quiet; then
-            git commit -m 'V0.6.2+16: suivi remis à zéro sans effacement et attente autorisation QR'
+            git commit -m 'V0.6.2+16: sources analysées et suivi conservé sans effacement'
             git push origin HEAD:${GITHUB_REF_NAME}
           fi
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
