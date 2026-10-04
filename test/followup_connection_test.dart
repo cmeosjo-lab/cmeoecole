@@ -196,7 +196,7 @@ void main() {
   test(
     'pair pending, refusal, acceptance and QR Principal identity are enforced',
     () async {
-      final previousOverrides = HttpOverrides.global;
+      final previousOverrides = HttpOverrides.current;
       HttpOverrides.global = null;
       final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
       var state = 'pending';
