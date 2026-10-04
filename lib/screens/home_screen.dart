@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+
 import '../models/principal_config.dart';
 import '../models/school_data.dart';
 import '../services/local_store.dart';
@@ -7,6 +8,8 @@ import '../services/principal_api.dart';
 import '../services/sync_coordinator.dart';
 import '../widgets/school_header.dart';
 import 'classes_screen.dart';
+import 'followup_screen.dart';
+import '../services/user_message.dart';
 
 class HomeScreen extends StatefulWidget {
   final PrincipalConfig config;
@@ -57,7 +60,7 @@ class _HomeScreenState extends State<HomeScreen> {
       final config = await widget.store.loadConfig();
       final s = await widget.store.loadSnapshot();
       final q = await widget.store.loadQueue();
-      final h = await widget.store.loadTransmissionHistory();
+      final h = await widget.store.loadFollowUpHistory();
       final last = await widget.store.lastSuccessfulSync();
       if (!mounted || generation != _generation) return;
       setState(() {
@@ -83,131 +86,14 @@ class _HomeScreenState extends State<HomeScreen> {
   String _when(DateTime? d) => d == null
       ? 'Pas encore effectuée'
       : '${d.toLocal().day.toString().padLeft(2, '0')}/${d.toLocal().month.toString().padLeft(2, '0')} à ${d.toLocal().hour.toString().padLeft(2, '0')}:${d.toLocal().minute.toString().padLeft(2, '0')}';
-  String _label(String s) =>
-      const {
-        'pending': 'À envoyer',
-        'received': 'Reçu par le Principal',
-        'accepted': 'Validé',
-        'refused': 'Refusé',
-      }[s] ??
-      s;
   Future<void> _history() async {
-    final q = await widget.store.loadQueue();
-    final h = await widget.store.loadTransmissionHistory();
-    final all = [...q, ...h]
-      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
-    if (!mounted) return;
-    var filter = 'all';
-    await showDialog<void>(
-      context: context,
-      builder: (dialogContext) => StatefulBuilder(
-        builder: (context, update) {
-          final items = all
-              .where((e) => filter == 'all' || e.status == filter)
-              .toList();
-          return AlertDialog(
-            title: const Text('Suivi des saisies'),
-            content: SizedBox(
-              width: 640,
-              height: MediaQuery.sizeOf(context).height * .6,
-              child: Column(
-                children: [
-                  DropdownButton<String>(
-                    value: filter,
-                    isExpanded: true,
-                    items: ['all', 'pending', 'received', 'accepted', 'refused']
-                        .map(
-                          (s) => DropdownMenuItem(
-                            value: s,
-                            child: Text(
-                              s == 'all' ? 'Toutes les saisies' : _label(s),
-                            ),
-                          ),
-                        )
-                        .toList(),
-                    onChanged: (s) => update(() => filter = s ?? 'all'),
-                  ),
-                  Expanded(
-                    child: items.isEmpty
-                        ? const Center(
-                            child: Text('Aucune saisie dans cette catégorie.'),
-                          )
-                        : ListView.builder(
-                            itemCount: items.length,
-                            itemBuilder: (context, i) {
-                              final e = items[i];
-                              final matching = snapshot?.students.where(
-                                (s) => s.id == e.studentId,
-                              );
-                              final student =
-                                  matching != null && matching.isNotEmpty
-                                  ? matching.first.displayName
-                                  : e.studentId.isEmpty
-                                  ? 'Toute la classe'
-                                  : 'Élève archivé';
-                              final note = (e.payload['_reviewNote'] ?? '')
-                                  .toString();
-                              return ListTile(
-                                contentPadding: EdgeInsets.zero,
-                                leading: Icon(
-                                  e.status == 'refused'
-                                      ? Icons.error_outline
-                                      : e.status == 'accepted'
-                                      ? Icons.verified_outlined
-                                      : Icons.schedule,
-                                ),
-                                title: Text('$student — ${e.displayType}'),
-                                subtitle: Text(
-                                  '${_label(e.status)} · ${_when(e.createdAt)}${note.isEmpty ? '' : '\nMotif : $note'}',
-                                ),
-                              );
-                            },
-                          ),
-                  ),
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(dialogContext),
-                child: const Text('Fermer'),
-              ),
-            ],
-          );
-        },
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => FollowUpScreen(store: widget.store, snapshot: snapshot),
       ),
     );
-  }
-
-  Future<void> _log() async {
-    final logs = await widget.store.loadSyncLog();
-    if (!mounted) return;
-    await showDialog<void>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Diagnostic de synchronisation'),
-        content: SizedBox(
-          width: 640,
-          height: 400,
-          child: SingleChildScrollView(
-            child: SelectableText(logs.reversed.join('\n\n')),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () async {
-              await widget.store.clearSyncLog();
-              if (context.mounted) Navigator.pop(context);
-            },
-            child: const Text('Vider le journal'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Fermer'),
-          ),
-        ],
-      ),
-    );
+    await _refresh();
   }
 
   Future<void> _backup() async {
@@ -227,7 +113,7 @@ class _HomeScreenState extends State<HomeScreen> {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('Sauvegarde impossible : $e')));
+        ).showSnackBar(SnackBar(content: Text(userMessage(e))));
       }
     }
   }
@@ -238,7 +124,7 @@ class _HomeScreenState extends State<HomeScreen> {
       final raw = await showDialog<String>(
         context: context,
         builder: (context) => AlertDialog(
-          title: const Text('Restaurer une sauvegarde V2.4'),
+          title: const Text('Restaurer une sauvegarde'),
           content: TextField(
             controller: field,
             maxLines: 8,
@@ -274,7 +160,7 @@ class _HomeScreenState extends State<HomeScreen> {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('Restauration annulée : $e')));
+        ).showSnackBar(SnackBar(content: Text(userMessage(e))));
       }
     } finally {
       field.dispose();
@@ -341,7 +227,7 @@ class _HomeScreenState extends State<HomeScreen> {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('Adresse non modifiée : $e')));
+        ).showSnackBar(SnackBar(content: Text(userMessage(e))));
       }
     } finally {
       field.dispose();
@@ -357,7 +243,7 @@ class _HomeScreenState extends State<HomeScreen> {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text(e.toString())));
+        ).showSnackBar(SnackBar(content: Text(userMessage(e))));
       }
     }
   }
@@ -387,8 +273,6 @@ class _HomeScreenState extends State<HomeScreen> {
                   await _changeAddress();
                 case 'history':
                   await _history();
-                case 'log':
-                  await _log();
                 case 'backup':
                   await _backup();
                 case 'restore':
@@ -402,7 +286,6 @@ class _HomeScreenState extends State<HomeScreen> {
                 value: 'history',
                 child: Text('Suivi des saisies'),
               ),
-              const PopupMenuItem(value: 'log', child: Text('Diagnostic')),
               PopupMenuItem(
                 value: 'address',
                 enabled: !c.busy,
@@ -477,7 +360,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       if (error != null)
                         Padding(
                           padding: const EdgeInsets.only(top: 10),
-                          child: Text(error),
+                          child: Text(userMessage(error)),
                         ),
                       if (c.busy)
                         const Padding(
@@ -491,7 +374,7 @@ class _HomeScreenState extends State<HomeScreen> {
               Card(
                 child: ListTile(
                   onTap: _history,
-                  title: const Text('Décisions du Principal'),
+                  title: const Text('Suivi des saisies'),
                   subtitle: Text(
                     '$received à valider · $accepted validée(s) · $refused refusée(s)',
                   ),
@@ -529,22 +412,6 @@ class _HomeScreenState extends State<HomeScreen> {
                 'Envoi automatique après vos saisies et au retour dans l’application. Le PC Principal doit rester ouvert sur le même réseau local.',
               ),
               const SizedBox(height: 14),
-              ExpansionTile(
-                title: const Text('Informations techniques'),
-                children: [
-                  ListTile(
-                    title: const Text('GESTCOURS Mobile V0.6.0 · Pack V2.4'),
-                    subtitle: Text(
-                      'Connexion : ${actualConfig?.host ?? widget.config.host}:${actualConfig?.port ?? widget.config.port}\nStockage local transactionnel SQLite',
-                    ),
-                  ),
-                  ListTile(
-                    title: const Text('Ouvrir le diagnostic'),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: _log,
-                  ),
-                ],
-              ),
               const SizedBox(height: 30),
             ],
           ),

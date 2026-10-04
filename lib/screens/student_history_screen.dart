@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+
 import '../models/school_data.dart';
 
 class StudentHistoryScreen extends StatelessWidget {

@@ -1,7 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+
 import 'package:http/http.dart' as http;
+
 import '../models/principal_config.dart';
 import '../models/school_data.dart';
 import '../models/teacher_event.dart';
@@ -13,10 +15,18 @@ class PrincipalApiException implements Exception {
   String toString() => message;
 }
 
+class PairingPendingException extends PrincipalApiException {
+  final String confirmationCode;
+  PairingPendingException(this.confirmationCode)
+    : super(
+        'Votre demande attend l’accord du responsable sur le tableau de bord du Principal.',
+      );
+}
+
 class PrincipalApi {
   static const int supportedProtocol = 6;
   static const int defaultPort = 47831;
-  static const String mobileVersion = '0.6.1';
+  static const String mobileVersion = '0.6.2';
   final Duration timeout;
 
   const PrincipalApi({this.timeout = const Duration(seconds: 8)});
@@ -56,6 +66,7 @@ class PrincipalApi {
     required String deviceId,
     int port = defaultPort,
     Duration? pairTimeout,
+    String expectedPrincipalId = '',
   }) async {
     try {
       final uri = Uri.parse('http://$host:$port/api/v1/pair').replace(
@@ -102,9 +113,26 @@ class PrincipalApi {
       if (!ok || teacher.isEmpty) {
         throw PrincipalApiException('Réponse du Principal invalide.');
       }
-      if (authorized == false) {
+      if (expectedPrincipalId.isNotEmpty &&
+          data['principalId'] != expectedPrincipalId) {
         throw PrincipalApiException(
-          'Cet appareil attend une autorisation ou est désactivé. Sur le Principal : Réseau enseignants > Appareils autorisés.',
+          'Ce PC ne correspond pas à votre établissement.',
+        );
+      }
+      if (authorized == false) {
+        final state = (data['deviceState'] ?? 'pending').toString();
+        if (state == 'refused' || state == 'disabled') {
+          throw PrincipalApiException(
+            'Cet appareil est refusé ou désactivé. Contactez le responsable de l’établissement.',
+          );
+        }
+        if (state != 'pending') {
+          throw PrincipalApiException(
+            'La demande ne peut pas être enregistrée. Contactez le responsable.',
+          );
+        }
+        throw PairingPendingException(
+          (data['confirmationCode'] ?? '').toString(),
         );
       }
       return PrincipalConfig(
@@ -135,6 +163,7 @@ class PrincipalApi {
     String rawHost,
     String rawCode, {
     required String deviceId,
+    String expectedPrincipalId = '',
   }) async {
     final raw = rawHost.trim();
     final parsed = Uri.tryParse(raw.contains('://') ? raw : 'http://$raw');
@@ -166,6 +195,7 @@ class PrincipalApi {
       deviceId: deviceId,
       port: port,
       pairTimeout: const Duration(seconds: 3),
+      expectedPrincipalId: expectedPrincipalId,
     );
     if (found == null) {
       throw PrincipalApiException(

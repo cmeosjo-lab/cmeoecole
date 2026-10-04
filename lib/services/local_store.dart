@@ -1,9 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:uuid/uuid.dart';
+
 import '../models/principal_config.dart';
 import '../models/school_data.dart';
 import '../models/teacher_event.dart';
@@ -304,6 +306,41 @@ class LocalStore extends ChangeNotifier {
       orderBy: 'created_at, id',
     );
     return rows.map(_event).toList();
+  }
+
+  /// A reset archives the current visible states, never the events themselves.
+  /// A later review/status change becomes visible again automatically.
+  Future<List<TeacherEvent>> loadFollowUpHistory({
+    bool archived = false,
+  }) async {
+    final d = await _db;
+    final scope = await _scope(d);
+    final hidden = archived ? 'EXISTS' : 'NOT EXISTS';
+    final rows = await d.rawQuery(
+      "SELECT e.* FROM events e WHERE e.scope = ? AND e.status != 'pending' AND $hidden (SELECT 1 FROM meta m WHERE m.key = 'followup_hidden:' || e.id AND m.value = e.status || char(31) || e.review_note) ORDER BY e.created_at, e.id",
+      [scope],
+    );
+    return rows.map(_event).toList();
+  }
+
+  Future<void> resetFollowUp() async {
+    final d = await _db;
+    await d.transaction((tx) async {
+      final scope = await _scope(tx);
+      final rows = await tx.query(
+        'events',
+        where: "scope = ? AND status != 'pending'",
+        whereArgs: [scope],
+      );
+      for (final row in rows) {
+        await _put(
+          tx,
+          'followup_hidden:${row['id']}',
+          "${row['status']}\u001f${row['review_note']}",
+        );
+      }
+    });
+    _changed();
   }
 
   Future<void> enqueue(TeacherEvent event) => enqueueMany([event]);

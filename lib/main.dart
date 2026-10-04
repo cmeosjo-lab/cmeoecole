@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+
 import 'models/principal_config.dart';
 import 'screens/home_screen.dart';
 import 'screens/setup_screen.dart';
@@ -61,8 +63,22 @@ class _EcoleGestionProfAppState extends State<EcoleGestionProfApp> {
             appBar: AppBar(title: const Text('Protection des données')),
             body: Padding(
               padding: const EdgeInsets.all(24),
-              child: SelectableText(
-                'Les données locales n’ont pas pu être ouvertes. Aucune remise à zéro n’a été effectuée.\n\nNe désinstallez pas l’application.\n\n$startupError',
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SelectableText(
+                    'Les données locales n’ont pas pu être ouvertes. Aucune remise à zéro n’a été effectuée.\n\nNe désinstallez pas l’application. Contactez le responsable pour récupérer vos données.',
+                  ),
+                  const SizedBox(height: 20),
+                  OutlinedButton(
+                    onPressed: () async {
+                      await Clipboard.setData(
+                        ClipboardData(text: startupError!),
+                      );
+                    },
+                    child: const Text('Copier un rapport pour le responsable'),
+                  ),
+                ],
               ),
             ),
           )

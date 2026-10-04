@@ -1,7 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
+
 import '../models/principal_config.dart';
+import '../models/pairing_code.dart';
+import '../services/user_message.dart';
 import '../services/local_store.dart';
 import '../services/principal_api.dart';
 import '../services/platform_permissions.dart';
@@ -20,10 +25,17 @@ class SetupScreen extends StatefulWidget {
   State<SetupScreen> createState() => _SetupScreenState();
 }
 
-class _SetupScreenState extends State<SetupScreen> {
+class _SetupScreenState extends State<SetupScreen> with WidgetsBindingObserver {
   final host = TextEditingController();
   final code = TextEditingController();
-  bool busy = false;
+  bool busy = false, waiting = false, _active = true;
+  Timer? _poll;
+  int _attempt = 0, _polls = 0;
+  String _expectedPrincipalId = '',
+      _pendingHost = '',
+      _pendingCode = '',
+      _pendingDevice = '';
+
   String? error;
   String status =
       'Recopiez l’adresse affichée dans GESTCOURS Principal, puis votre code professeur.';
@@ -31,6 +43,7 @@ class _SetupScreenState extends State<SetupScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _loadPrevious();
   }
 
@@ -42,6 +55,9 @@ class _SetupScreenState extends State<SetupScreen> {
   }
 
   Future<void> connect() async {
+    if (busy) return;
+    final attempt = ++_attempt;
+    _polls = 0;
     FocusScope.of(context).unfocus();
     final enteredHost = host.text.trim();
     final enteredCode = code.text.trim();
@@ -72,59 +88,120 @@ class _SetupScreenState extends State<SetupScreen> {
     }
 
     try {
-      final deviceId = await widget.store.getOrCreateDeviceId();
-      final c = await widget.api.pairAddress(
-        enteredHost,
-        enteredCode,
-        deviceId: deviceId,
-      );
-      if (mounted) {
-        setState(
-          () => status = 'Connexion trouvée. Synchronisation de vos classes…',
-        );
-      }
-      final snapshot = await widget.api.sync(c, deviceId: deviceId);
-      await widget.store.activateSession(c, snapshot);
-      if (!mounted) return;
-      widget.onConnected(c);
+      _pendingDevice = await widget.store.getOrCreateDeviceId();
+      _pendingHost = enteredHost;
+      _pendingCode = enteredCode;
+      await _tryConnection(attempt);
     } catch (e) {
-      if (!mounted) return;
+      if (mounted && attempt == _attempt) {
+        setState(() {
+          busy = false;
+          error = userMessage(e);
+        });
+      }
+    }
+  }
+
+  Future<void> _tryConnection(int attempt) async {
+    if (!mounted || attempt != _attempt) return;
+    try {
+      final c = await widget.api.pairAddress(
+        _pendingHost,
+        _pendingCode,
+        deviceId: _pendingDevice,
+        expectedPrincipalId: _expectedPrincipalId,
+      );
+      if (!mounted || attempt != _attempt) return;
+      setState(() {
+        waiting = false;
+        status = 'Connexion acceptée. Chargement de vos classes…';
+      });
+      final snapshot = await widget.api.sync(c, deviceId: _pendingDevice);
+      if (!mounted || attempt != _attempt) return;
+      await widget.store.activateSession(c, snapshot);
+      if (!mounted || attempt != _attempt) return;
+      widget.onConnected(c);
+    } on PairingPendingException catch (e) {
+      if (!mounted || attempt != _attempt) return;
+      setState(() {
+        waiting = true;
+        error = null;
+        status =
+            'Demande envoyée. Le responsable doit l’accepter sur le tableau de bord du Principal.${e.confirmationCode.isEmpty ? '' : '\nRepère à vérifier ensemble : ${e.confirmationCode}'}\nLa connexion se poursuivra automatiquement.';
+      });
+      if (++_polls >= 90) {
+        _stopWaiting();
+        return;
+      }
+      _schedulePoll();
+    } catch (e) {
+      try {
+        await widget.store.appendSyncLog('Connexion non établie : $e');
+      } catch (_) {}
+      if (!mounted || attempt != _attempt) return;
       setState(() {
         busy = false;
-        error = e.toString();
+        waiting = false;
+        error = userMessage(e);
         status = 'Connexion non établie.';
       });
     }
   }
 
+  void _schedulePoll() {
+    _poll?.cancel();
+    if (_active && waiting && mounted) {
+      final attempt = _attempt;
+      _poll = Timer(const Duration(seconds: 3), () => _tryConnection(attempt));
+    }
+  }
+
+  void _stopWaiting() {
+    _poll?.cancel();
+    ++_attempt;
+    if (mounted) {
+      setState(() {
+        busy = false;
+        waiting = false;
+        status =
+            'L’attente est interrompue. Votre demande reste visible sur le Principal. Appuyez sur Se connecter après son acceptation.';
+      });
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _active = state == AppLifecycleState.resumed;
+    if (_active) {
+      _schedulePoll();
+    } else {
+      _poll?.cancel();
+    }
+  }
+
   Future<void> scanQr() async {
+    if (busy) return;
     final result = await Navigator.of(
       context,
     ).push<String>(MaterialPageRoute(builder: (_) => const _QrScanner()));
     if (result == null || !mounted) return;
     try {
-      final value = result.trim();
-      final p = value.split('|');
-      if (p.length == 5 && p[0] == 'ECOLEPRO') {
-        host.text = p[1].trim();
-        code.text = p[4].trim();
-        await connect();
-        return;
-      }
-      if (p.length >= 3 && p[0] == 'GESTCOURS') {
-        host.text = p[1].trim();
-        code.text = p[2].trim();
-        await connect();
-        return;
-      }
-      setState(() => error = 'QR GESTCOURS non reconnu.');
+      final parsed = PairingCode.parse(result);
+      host.text = parsed.address;
+      code.text = parsed.code;
+      _expectedPrincipalId = parsed.principalId;
     } catch (_) {
-      setState(() => error = 'QR GESTCOURS non reconnu.');
+      setState(() => error = 'Ce QR n’est pas un code de connexion GESTCOURS.');
+      return;
     }
+    await connect();
   }
 
   @override
   void dispose() {
+    _poll?.cancel();
+    ++_attempt;
+    WidgetsBinding.instance.removeObserver(this);
     host.dispose();
     code.dispose();
     super.dispose();
@@ -213,8 +290,19 @@ class _SetupScreenState extends State<SetupScreen> {
                         ),
                       ),
                       const SizedBox(height: 22),
+                      FilledButton.icon(
+                        onPressed: busy ? null : scanQr,
+                        icon: const Icon(Icons.qr_code_scanner),
+                        label: const Text('Scanner le QR du Principal'),
+                      ),
+                      const SizedBox(height: 10),
+                      const Text(
+                        'Sur le PC : Tableau de bord → QR de connexion. Ou saisissez l’adresse et votre code ci-dessous.',
+                      ),
+                      const SizedBox(height: 16),
                       TextField(
                         controller: host,
+                        onChanged: (_) => _expectedPrincipalId = '',
                         enabled: !busy,
                         keyboardType: TextInputType.url,
                         decoration: const InputDecoration(
@@ -303,14 +391,14 @@ class _SetupScreenState extends State<SetupScreen> {
                         label: Text(busy ? 'CONNEXION…' : 'SE CONNECTER'),
                       ),
                       const SizedBox(height: 10),
-                      OutlinedButton.icon(
-                        onPressed: busy ? null : scanQr,
-                        icon: const Icon(Icons.qr_code_scanner),
-                        label: const Text('Scanner un QR GESTCOURS (option)'),
-                      ),
+                      if (waiting)
+                        OutlinedButton(
+                          onPressed: _stopWaiting,
+                          child: const Text('Arrêter l’attente'),
+                        ),
                       const SizedBox(height: 14),
                       const Text(
-                        'L’adresse à recopier est affichée dans Principal > Réseau enseignants. Le port et votre nom ne sont pas à saisir.',
+                        'L’adresse à recopier est affichée dans Principal > Réseau enseignants. Ces informations seront mémorisées.',
                         textAlign: TextAlign.center,
                       ),
                     ],

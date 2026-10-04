@@ -1,5 +1,7 @@
 import 'dart:async';
+
 import 'package:flutter/widgets.dart';
+
 import 'local_store.dart';
 import 'principal_api.dart';
 import 'sync_service.dart';
