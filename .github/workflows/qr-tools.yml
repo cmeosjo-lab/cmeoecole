@@ -1,0 +1,25 @@
+name: Outils QR locaux
+on:
+  push:
+    branches: ['release/connexion-simple-v0.6.2']
+    paths: ['.github/workflows/qr-tools.yml']
+permissions:
+  contents: read
+jobs:
+  qr:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.2'
+      - run: |
+          mkdir qrtools && cd qrtools
+          go mod init gestcoursqrtools
+          printf 'package main\nimport _ "github.com/skip2/go-qrcode"\nfunc main() {}\n' > main.go
+          go get github.com/skip2/go-qrcode@v0.0.0-20200617195104-da1b6568686e
+          go mod vendor
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GESTCOURS_QR_LOCAL_DEPENDENCY
+          path: qrtools/
+          retention-days: 30
