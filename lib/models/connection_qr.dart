@@ -3,8 +3,9 @@ class ConnectionQr {
   final String address, code, principalId;
   const ConnectionQr(this.address, this.code, this.principalId);
   factory ConnectionQr.parse(String input) {
-    if (input.length > 2048)
+    if (input.length > 2048) {
       throw const FormatException('QR GESTCOURS non reconnu.');
+    }
     final parts = input.trim().split('|');
     String address, code, id = '';
     if ((parts.length == 3 || parts.length == 4) && parts[0] == 'GESTCOURS') {

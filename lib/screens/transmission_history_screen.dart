@@ -59,11 +59,12 @@ class _TransmissionHistoryScreenState extends State<TransmissionHistoryScreen> {
         _error = null;
       });
     } catch (_) {
-      if (mounted && generation == _generation)
+      if (mounted && generation == _generation) {
         setState(
           () => _error =
               'Le suivi ne peut pas être ouvert. Les saisies sont conservées.',
         );
+      }
     }
   }
 
@@ -117,7 +118,7 @@ class _TransmissionHistoryScreenState extends State<TransmissionHistoryScreen> {
         );
       }
     } catch (_) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text(
@@ -125,6 +126,7 @@ class _TransmissionHistoryScreenState extends State<TransmissionHistoryScreen> {
             ),
           ),
         );
+      }
     } finally {
       if (mounted) setState(() => _resetting = false);
     }

@@ -51,13 +51,14 @@ class _SetupScreenState extends State<SetupScreen> {
     _attempt++;
     _retry?.cancel();
     if (_retryWait != null && !_retryWait!.isCompleted) _retryWait!.complete();
-    if (mounted)
+    if (mounted) {
       setState(() {
         busy = false;
         waiting = false;
         status =
             'Vous pouvez relancer la connexion lorsque le responsable est prêt.';
       });
+    }
   }
 
   Future<void> connect() async {
@@ -87,8 +88,9 @@ class _SetupScreenState extends State<SetupScreen> {
     try {
       final permission = await PlatformPermissions.ensureLocalNetwork();
       if (!active()) return;
-      if (!permission.mayProceed)
+      if (!permission.mayProceed) {
         throw PrincipalApiException(permission.message);
+      }
       final deviceId = await widget.store.getOrCreateDeviceId();
       final deadline = DateTime.now().add(const Duration(minutes: 2));
       while (active()) {
@@ -129,17 +131,19 @@ class _SetupScreenState extends State<SetupScreen> {
         }
       }
     } catch (e) {
-      if (active())
+      if (active()) {
         setState(() {
           error = e.toString();
           status = 'Connexion non établie.';
         });
+      }
     } finally {
-      if (active())
+      if (active()) {
         setState(() {
           busy = false;
           waiting = false;
         });
+      }
     }
   }
 
