@@ -7,10 +7,11 @@ permissions:
   contents: read
 concurrency:
   group: gestcours-v062-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
   validate:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: write
     outputs:
@@ -23,16 +24,11 @@ jobs:
         with:
           flutter-version: '3.47.5'
           cache: true
-      - name: Intégrer les évolutions ciblées
-        shell: bash
+      - name: Préparer les sources sans changer les dépendances
         run: |
-          if grep -q 'version: 0.6.1+15' pubspec.yaml; then python3 ci/update_v062.py; fi
-          python3 - <<'PY'
-          from pathlib import Path
-          p=Path('lib/screens/home_screen.dart');t=p.read_text().replace('  PrincipalConfig? actualConfig;\n','').replace('      final config = await widget.store.loadConfig();\n','').replace('        actualConfig = config;\n','');p.write_text(t)
-          p=Path('lib/screens/setup_screen.dart');t=p.read_text().replace('bool busy = false, waiting = false;', 'bool busy = false;').replace('waiting = false; ', '').replace('waiting = true; ', '');p.write_text(t)
-          PY
+          grep -q 'version: 0.6.2+16' pubspec.yaml
           flutter pub get --enforce-lockfile
+          dart format lib test
           dart fix --apply lib
           dart fix --apply test
           dart format lib test
@@ -43,7 +39,7 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add lib test pubspec.yaml pubspec.lock analysis_options.yaml
           if ! git diff --cached --quiet; then
-            git commit -m 'V0.6.2+16: suivi archivable sans perte et connexion QR avec attente'
+            git commit -m 'V0.6.2+16: sources de connexion et suivi formatées'
             git push origin HEAD:${GITHUB_REF_NAME}
           fi
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
@@ -51,7 +47,6 @@ jobs:
           git rev-parse HEAD > dist/SOURCE_COMMIT.txt
           git archive --format=zip -o dist/GESTCOURS_MOBILE_V0_6_2_SOURCES.zip HEAD
       - name: Analyse et tests de conservation des données
-        shell: bash
         run: |
           flutter analyze lib test 2>&1 | tee dist/analyse.txt
           flutter test --reporter expanded test 2>&1 | tee dist/tests.txt
@@ -60,6 +55,7 @@ jobs:
         with:
           name: GESTCOURS_V062_SOURCES_TESTS
           path: dist/
+          retention-days: 30
   android:
     needs: validate
     runs-on: ubuntu-latest
@@ -121,9 +117,11 @@ jobs:
         with:
           name: GESTCOURS_ANDROID_V062_BUILD_TESTS
           path: dist/
+          retention-days: 30
   ios:
     needs: validate
     runs-on: macos-15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
         with:
@@ -151,3 +149,4 @@ jobs:
         with:
           name: GESTCOURS_IOS_V062_A_SIGNER
           path: dist/
+          retention-days: 30
