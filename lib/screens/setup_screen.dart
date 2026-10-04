@@ -5,6 +5,8 @@ import '../models/principal_config.dart';
 import '../services/local_store.dart';
 import '../services/principal_api.dart';
 import '../services/platform_permissions.dart';
+import '../services/pairing_code.dart';
+import '../services/user_messages.dart';
 
 class SetupScreen extends StatefulWidget {
   final LocalStore store;
@@ -24,9 +26,12 @@ class _SetupScreenState extends State<SetupScreen> {
   final host = TextEditingController();
   final code = TextEditingController();
   bool busy = false;
+  int _attempt = 0;
+  String _expectedPrincipal = '';
+
   String? error;
   String status =
-      'Recopiez l’adresse affichée dans GESTCOURS Principal, puis votre code professeur.';
+      'Scannez votre QR affiché sur le Principal, ou saisissez votre adresse et votre code.';
 
   @override
   void initState() {
@@ -41,59 +46,87 @@ class _SetupScreenState extends State<SetupScreen> {
     code.text = previous.code;
   }
 
+  void cancelConnection() {
+    _attempt++;
+    if (mounted)
+      setState(() {
+        busy = false;
+        status = 'Connexion interrompue sur ce téléphone.';
+      });
+  }
+
   Future<void> connect() async {
+    if (busy) return;
     FocusScope.of(context).unfocus();
-    final enteredHost = host.text.trim();
-    final enteredCode = code.text.trim();
-    if (enteredHost.isEmpty) {
-      setState(() => error = 'Saisissez l’adresse du PC Principal.');
+    final enteredHost = host.text.trim(), enteredCode = code.text.trim();
+    if (enteredHost.isEmpty || !RegExp(r'^\d{6}$').hasMatch(enteredCode)) {
+      setState(
+        () => error =
+            'Saisissez l’adresse du Principal et le code à 6 chiffres, ou scannez votre QR.',
+      );
       return;
     }
-    if (!RegExp(r'^\d{6}$').hasMatch(enteredCode)) {
-      setState(() => error = 'Saisissez le code professeur à 6 chiffres.');
-      return;
-    }
+    final attempt = ++_attempt;
     setState(() {
       busy = true;
       error = null;
-      status = 'Connexion à GESTCOURS Principal…';
+      status = 'Connexion au Principal…';
     });
-
-    final lanPermission = await PlatformPermissions.ensureLocalNetwork();
-    if (!lanPermission.mayProceed) {
-      if (mounted) {
+    try {
+      final permission = await PlatformPermissions.ensureLocalNetwork();
+      if (!mounted || attempt != _attempt) return;
+      if (!permission.mayProceed)
+        throw PrincipalApiException(permission.message);
+      final deviceId = await widget.store.getOrCreateDeviceId();
+      final deadline = DateTime.now().add(const Duration(minutes: 2));
+      while (mounted && attempt == _attempt) {
+        try {
+          final c = await widget.api.pairAddress(
+            enteredHost,
+            enteredCode,
+            deviceId: deviceId,
+          );
+          if (!mounted || attempt != _attempt) return;
+          if (_expectedPrincipal.isNotEmpty &&
+              c.principalId != _expectedPrincipal) {
+            throw PrincipalApiException(
+              'Ce QR ne correspond pas au Principal trouvé. Demandez un nouveau QR au responsable.',
+            );
+          }
+          setState(() {
+            status = 'Connexion autorisée. Réception de vos classes…';
+          });
+          final snapshot = await widget.api.sync(c, deviceId: deviceId);
+          if (!mounted || attempt != _attempt) return;
+          await widget.store.activateSession(c, snapshot);
+          if (!mounted || attempt != _attempt) return;
+          widget.onConnected(c);
+          return;
+        } on PrincipalApprovalPending catch (request) {
+          if (!mounted || attempt != _attempt) return;
+          setState(() {
+            status =
+                'Demande envoyée pour ${request.teacher}. Le responsable doit l’accepter sur le tableau de bord du Principal.';
+          });
+          if (DateTime.now().isAfter(deadline)) {
+            throw PrincipalApiException(
+              'La demande attend toujours le responsable. Après son accord, appuyez sur Se connecter.',
+            );
+          }
+          await Future<void>.delayed(const Duration(seconds: 3));
+        }
+      }
+    } catch (e) {
+      if (mounted && attempt == _attempt)
+        setState(() {
+          error = userMessage(e);
+          status = 'Connexion non établie.';
+        });
+    } finally {
+      if (mounted && attempt == _attempt)
         setState(() {
           busy = false;
-          error = lanPermission.message;
-          status = 'Autorisation réseau local nécessaire.';
         });
-      }
-      return;
-    }
-
-    try {
-      final deviceId = await widget.store.getOrCreateDeviceId();
-      final c = await widget.api.pairAddress(
-        enteredHost,
-        enteredCode,
-        deviceId: deviceId,
-      );
-      if (mounted) {
-        setState(
-          () => status = 'Connexion trouvée. Synchronisation de vos classes…',
-        );
-      }
-      final snapshot = await widget.api.sync(c, deviceId: deviceId);
-      await widget.store.activateSession(c, snapshot);
-      if (!mounted) return;
-      widget.onConnected(c);
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        busy = false;
-        error = e.toString();
-        status = 'Connexion non établie.';
-      });
     }
   }
 
@@ -103,28 +136,23 @@ class _SetupScreenState extends State<SetupScreen> {
     ).push<String>(MaterialPageRoute(builder: (_) => const _QrScanner()));
     if (result == null || !mounted) return;
     try {
-      final value = result.trim();
-      final p = value.split('|');
-      if (p.length == 5 && p[0] == 'ECOLEPRO') {
-        host.text = p[1].trim();
-        code.text = p[4].trim();
-        await connect();
-        return;
-      }
-      if (p.length >= 3 && p[0] == 'GESTCOURS') {
-        host.text = p[1].trim();
-        code.text = p[2].trim();
-        await connect();
-        return;
-      }
-      setState(() => error = 'QR GESTCOURS non reconnu.');
-    } catch (_) {
-      setState(() => error = 'QR GESTCOURS non reconnu.');
+      final pairing = PairingCode.parse(result);
+      host.text = pairing.address;
+      code.text = pairing.code;
+      _expectedPrincipal = pairing.principalId;
+    } on FormatException {
+      setState(
+        () => error =
+            'QR non reconnu. Scannez le QR personnel affiché par le Principal.',
+      );
+      return;
     }
+    await connect();
   }
 
   @override
   void dispose() {
+    _attempt++;
     host.dispose();
     code.dispose();
     super.dispose();
@@ -213,7 +241,16 @@ class _SetupScreenState extends State<SetupScreen> {
                         ),
                       ),
                       const SizedBox(height: 22),
+                      FilledButton.icon(
+                        onPressed: busy ? null : scanQr,
+                        icon: const Icon(Icons.qr_code_scanner),
+                        label: const Text('Scanner mon QR de connexion'),
+                      ),
+                      const SizedBox(height: 14),
+                      const Text('Ou se connecter avec une adresse et un code'),
+                      const SizedBox(height: 10),
                       TextField(
+                        onChanged: (_) => _expectedPrincipal = '',
                         controller: host,
                         enabled: !busy,
                         keyboardType: TextInputType.url,
@@ -303,14 +340,14 @@ class _SetupScreenState extends State<SetupScreen> {
                         label: Text(busy ? 'CONNEXION…' : 'SE CONNECTER'),
                       ),
                       const SizedBox(height: 10),
-                      OutlinedButton.icon(
-                        onPressed: busy ? null : scanQr,
-                        icon: const Icon(Icons.qr_code_scanner),
-                        label: const Text('Scanner un QR GESTCOURS (option)'),
-                      ),
+                      if (busy)
+                        OutlinedButton(
+                          onPressed: cancelConnection,
+                          child: const Text('Annuler l’attente'),
+                        ),
                       const SizedBox(height: 14),
                       const Text(
-                        'L’adresse à recopier est affichée dans Principal > Réseau enseignants. Le port et votre nom ne sont pas à saisir.',
+                        'Le responsable affiche votre QR depuis le tableau de bord du Principal. Il doit ensuite autoriser votre appareil.',
                         textAlign: TextAlign.center,
                       ),
                     ],

@@ -13,10 +13,18 @@ class PrincipalApiException implements Exception {
   String toString() => message;
 }
 
+class PrincipalApprovalPending implements Exception {
+  final String teacher;
+  const PrincipalApprovalPending(this.teacher);
+  @override
+  String toString() =>
+      'Demande envoyée. Attendez l’accord du responsable sur le Principal.';
+}
+
 class PrincipalApi {
   static const int supportedProtocol = 6;
   static const int defaultPort = 47831;
-  static const String mobileVersion = '0.6.1';
+  static const String mobileVersion = '0.6.2';
   final Duration timeout;
 
   const PrincipalApi({this.timeout = const Duration(seconds: 8)});
@@ -103,9 +111,13 @@ class PrincipalApi {
         throw PrincipalApiException('Réponse du Principal invalide.');
       }
       if (authorized == false) {
-        throw PrincipalApiException(
-          'Cet appareil attend une autorisation ou est désactivé. Sur le Principal : Réseau enseignants > Appareils autorisés.',
-        );
+        if (data['deviceStatus'] == 'refused' ||
+            data['deviceStatus'] == 'disabled') {
+          throw PrincipalApiException(
+            'Accès non autorisé par le responsable. Contactez l’établissement.',
+          );
+        }
+        throw PrincipalApprovalPending(teacher);
       }
       return PrincipalConfig(
         host: host,

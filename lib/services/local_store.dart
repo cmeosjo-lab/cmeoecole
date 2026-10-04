@@ -306,6 +306,50 @@ class LocalStore extends ChangeNotifier {
     return rows.map(_event).toList();
   }
 
+  Future<Set<String>> archivedDashboardIds() async {
+    final d = await _db;
+    final raw = await _get(d, 'dashboard_archived:${await _scope(d)}');
+    if (raw == null) return <String>{};
+    return (jsonDecode(raw) as List).cast<String>().toSet();
+  }
+
+  Future<List<TeacherEvent>> loadDashboardHistory() async {
+    final hidden = await archivedDashboardIds();
+    final history = await loadTransmissionHistory();
+    return history
+        .where(
+          (e) =>
+              !hidden.contains(e.id) ||
+              (e.status != 'accepted' && e.status != 'refused'),
+        )
+        .toList();
+  }
+
+  /// Reset only visible completed counters; keep every original event and its status.
+  Future<int> resetDashboardHistory() async {
+    final d = await _db;
+    final count = await d.transaction((tx) async {
+      final scope = await _scope(tx);
+      final key = 'dashboard_archived:$scope';
+      final raw = await _get(tx, key);
+      final hidden = raw == null
+          ? <String>{}
+          : (jsonDecode(raw) as List).cast<String>().toSet();
+      final rows = await tx.query(
+        'events',
+        columns: ['id'],
+        where: "scope = ? AND status IN ('accepted', 'refused')",
+        whereArgs: [scope],
+      );
+      final before = hidden.length;
+      hidden.addAll(rows.map((r) => r['id'] as String));
+      await _put(tx, key, jsonEncode(hidden.toList()..sort()));
+      return hidden.length - before;
+    });
+    _changed();
+    return count;
+  }
+
   Future<void> enqueue(TeacherEvent event) => enqueueMany([event]);
   Future<void> enqueueMany(List<TeacherEvent> events) async {
     final d = await _db;
