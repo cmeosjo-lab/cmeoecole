@@ -1,0 +1,174 @@
+name: GESTCOURS V0.6.2 - connexion et suivi
+on:
+  workflow_dispatch:
+  push:
+    branches: ['release/connexion-simple-v0.6.2']
+    paths-ignore: ['.github/workflows/qr-tools.yml']
+permissions:
+  contents: read
+concurrency:
+  group: gestcours-simple-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    outputs:
+      source_sha: ${{ steps.source.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.ref_name }}
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.5'
+          channel: stable
+          cache: true
+      - name: Appliquer la simplification sans modifier la base ni les migrations
+        run: python3 ci/apply_simple_v062.py
+      - run: flutter pub get --enforce-lockfile
+      - name: Formater et enregistrer les sources exactes
+        id: source
+        shell: bash
+        run: |
+          dart fix --apply lib test
+          dart format lib test integration_test
+          git config user.name 'GESTCOURS Build'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add lib test integration_test pubspec.yaml analysis_options.yaml
+          if ! git diff --cached --quiet; then
+            git commit -m 'V0.6.2+16: suivi archivable, connexion QR et attente d’autorisation'
+            git push origin HEAD:${GITHUB_REF_NAME}
+          fi
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          mkdir -p dist
+          git rev-parse HEAD > dist/SOURCE_COMMIT.txt
+          git archive --format=zip -o dist/GESTCOURS_MOBILE_V0_6_2_SOURCES.zip HEAD
+      - name: Analyse stricte et tests de protection des saisies
+        shell: bash
+        run: |
+          flutter analyze lib test 2>&1 | tee dist/flutter-analyze.txt
+          flutter test --reporter expanded test 2>&1 | tee dist/flutter-tests.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: GESTCOURS_V062_SOURCES_TESTS
+          path: dist/
+          retention-days: 30
+  android:
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.validate.outputs.source_sha }}
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.5'
+          channel: stable
+          cache: true
+      - name: Préparer Android en conservant les sources et dépendances vérifiées
+        shell: bash
+        run: |
+          mkdir -p dist
+          sha256sum lib/main.dart pubspec.yaml pubspec.lock > /tmp/source.sha256
+          rm -rf android
+          flutter create --no-pub --platforms=android --org fr.ecolegestion --project-name ecole_gestion_prof_mobile .
+          git restore --source=HEAD -- lib test pubspec.yaml pubspec.lock analysis_options.yaml
+          rm -f test/widget_test.dart
+          sha256sum -c /tmp/source.sha256
+          python3 ci/patch_android.py
+          flutter pub get --enforce-lockfile
+      - name: Compiler et contrôler les APK release
+        shell: bash
+        run: |
+          flutter build apk --release --no-pub
+          cp build/app/outputs/flutter-apk/app-release.apk dist/GESTCOURS_PROF_ANDROID_V0_6_2_UNIVERSEL_VALIDATION.apk
+          GESTCOURS_ARM64_ONLY=1 flutter build apk --release --target-platform android-arm64 --no-pub
+          cp build/app/outputs/flutter-apk/app-release.apk dist/GESTCOURS_PROF_ANDROID_V0_6_2_ARM64_VALIDATION.apk
+          BT=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)
+          cp "$BT/lib/apksigner.jar" dist/apksigner.jar
+          cp "$BT/aapt" dist/aapt
+          cp "$BT/zipalign" dist/zipalign
+          for APK in dist/*.apk; do
+            "$BT/apksigner" verify --verbose --print-certs "$APK" >> dist/apk-inspection.txt
+            "$BT/aapt" dump badging "$APK" | tee "$RUNNER_TEMP/badging.txt" >> dist/apk-inspection.txt
+            grep -q "package: name='fr.ecolegestion.ecole_gestion_prof_mobile' versionCode='16' versionName='0.6.2'" "$RUNNER_TEMP/badging.txt"
+            if grep -q 'application-debuggable' "$RUNNER_TEMP/badging.txt"; then exit 1; fi
+            if [[ "$APK" == *ARM64* ]]; then grep -Eq "^native-code: 'arm64-v8a'[[:space:]]*$" "$RUNNER_TEMP/badging.txt"; fi
+          done
+      - name: Préparer le banc de test Android
+        shell: bash
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          flutter pub add --dev integration_test --sdk=flutter
+          flutter analyze integration_test
+          sed -i 's/V0_6_1/V0_6_2/g' ci/android_startup_smoke.sh
+      - name: Démarrage réel et remise à zéro sur Android natif
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          disable-animations: true
+          emulator-boot-timeout: 600
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: |
+            bash ci/android_startup_smoke.sh
+            bash -o pipefail -c 'flutter test integration_test/sqlite_startup_test.dart -d emulator-5554 --reporter expanded 2>&1 | tee dist/android-startup-tests.txt'
+            bash -o pipefail -c 'flutter test integration_test/followup_native_test.dart -d emulator-5554 --reporter expanded 2>&1 | tee dist/android-followup-tests.txt'
+      - name: Restaurer le manifeste de production
+        if: always()
+        run: git restore --source=HEAD -- pubspec.yaml pubspec.lock
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: GESTCOURS_ANDROID_V062_ET_CONTROLES
+          path: dist/
+          retention-days: 30
+  ios:
+    needs: validate
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.validate.outputs.source_sha }}
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.5'
+          channel: stable
+          cache: true
+      - name: Préparer iOS sans modifier le code vérifié
+        shell: bash
+        run: |
+          mkdir -p dist
+          rm -rf ios
+          flutter create --no-pub --platforms=ios --org fr.ecolegestion --project-name ecole_gestion_prof_mobile .
+          git restore --source=HEAD -- lib test pubspec.yaml pubspec.lock analysis_options.yaml
+          rm -f test/widget_test.dart
+          python3 ci/patch_ios.py
+          flutter pub get --enforce-lockfile
+      - name: Compiler iPhone et préparer IPA non signée
+        shell: bash
+        run: |
+          flutter build ios --release --no-codesign --no-pub
+          test -d build/ios/iphoneos/Runner.app
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' build/ios/iphoneos/Runner.app/Info.plist | tee dist/ios-version.txt
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' build/ios/iphoneos/Runner.app/Info.plist | tee -a dist/ios-version.txt
+          /usr/libexec/PlistBuddy -c 'Print :MinimumOSVersion' build/ios/iphoneos/Runner.app/Info.plist | tee -a dist/ios-version.txt
+          mkdir -p "$RUNNER_TEMP/gestcours-ipa/Payload"
+          cp -R build/ios/iphoneos/Runner.app "$RUNNER_TEMP/gestcours-ipa/Payload/Runner.app"
+          OUT="$PWD/dist/GESTCOURS_PROF_IOS_V0_6_2_A_SIGNER.ipa"
+          (cd "$RUNNER_TEMP/gestcours-ipa" && zip -qry "$OUT" Payload)
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: GESTCOURS_IOS_V062_A_SIGNER
+          path: dist/
+          retention-days: 30
