@@ -23,8 +23,12 @@ class ConnectionQr {
     }
     final uri = Uri.tryParse('http://$address');
     if (!RegExp(r'^\d{6}$').hasMatch(code) ||
-        uri == null || uri.host.isEmpty || uri.userInfo.isNotEmpty ||
-        uri.path.isNotEmpty || uri.hasQuery || uri.hasFragment ||
+        uri == null ||
+        uri.host.isEmpty ||
+        uri.userInfo.isNotEmpty ||
+        uri.path.isNotEmpty ||
+        uri.hasQuery ||
+        uri.hasFragment ||
         (uri.hasPort && (uri.port < 1 || uri.port > 65535)) ||
         !RegExp(r'^[a-zA-Z0-9_.:-]+$').hasMatch(address) ||
         !RegExp(r'^[a-zA-Z0-9_-]{0,100}$').hasMatch(principal)) {

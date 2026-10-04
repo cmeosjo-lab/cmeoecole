@@ -306,6 +306,47 @@ class LocalStore extends ChangeNotifier {
     return rows.map(_event).toList();
   }
 
+  // Only a display acknowledgement; never modifies or deletes the original event.
+  String _followupPrefix(String scope) =>
+      'followup_hidden:${base64Url.encode(utf8.encode(scope))}:';
+
+  Future<List<TeacherEvent>> loadFollowup({bool archived = false}) async {
+    final d = await _db;
+    final scope = await _scope(d);
+    final comparison = archived
+        ? "e.status != 'pending' AND m.value = e.status"
+        : "(e.status = 'pending' OR m.value IS NULL OR m.value != e.status)";
+    final rows = await d.rawQuery(
+      "SELECT e.* FROM events e LEFT JOIN meta m ON m.key = ? || e.id "
+      "WHERE e.scope = ? AND $comparison ORDER BY e.created_at DESC, e.id",
+      [_followupPrefix(scope), scope],
+    );
+    return rows.map(_event).toList();
+  }
+
+  Future<int> resetFollowup() async {
+    final d = await _db;
+    final count = await d.transaction((tx) async {
+      final scope = await _scope(tx);
+      final rows = await tx.query(
+        'events',
+        columns: ['id', 'status'],
+        where: "scope = ? AND status != 'pending'",
+        whereArgs: [scope],
+      );
+      for (final row in rows) {
+        await _put(
+          tx,
+          '${_followupPrefix(scope)}${row['id']}',
+          row['status'] as String,
+        );
+      }
+      return rows.length;
+    });
+    _changed();
+    return count;
+  }
+
   Future<void> enqueue(TeacherEvent event) => enqueueMany([event]);
   Future<void> enqueueMany(List<TeacherEvent> events) async {
     final d = await _db;

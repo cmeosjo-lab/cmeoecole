@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
@@ -5,6 +6,8 @@ import '../models/principal_config.dart';
 import '../services/local_store.dart';
 import '../services/principal_api.dart';
 import '../services/platform_permissions.dart';
+import '../services/user_message.dart';
+import '../models/connection_qr.dart';
 
 class SetupScreen extends StatefulWidget {
   final LocalStore store;
@@ -23,10 +26,11 @@ class SetupScreen extends StatefulWidget {
 class _SetupScreenState extends State<SetupScreen> {
   final host = TextEditingController();
   final code = TextEditingController();
-  bool busy = false;
+  bool busy = false, waiting = false;
+  int attempt = 0;
   String? error;
   String status =
-      'Recopiez l’adresse affichée dans GESTCOURS Principal, puis votre code professeur.';
+      'Scannez votre QR affiché par le Principal, ou saisissez votre adresse et votre code.';
 
   @override
   void initState() {
@@ -41,57 +45,89 @@ class _SetupScreenState extends State<SetupScreen> {
     code.text = previous.code;
   }
 
-  Future<void> connect() async {
+  void _cancelWait() {
+    attempt++;
+    setState(() {
+      busy = false;
+      waiting = false;
+      status = 'Vous pouvez relancer la connexion.';
+    });
+  }
+
+  Future<void> connect({String expectedPrincipalId = ''}) async {
+    if (busy) return;
     FocusScope.of(context).unfocus();
-    final enteredHost = host.text.trim();
-    final enteredCode = code.text.trim();
-    if (enteredHost.isEmpty) {
-      setState(() => error = 'Saisissez l’adresse du PC Principal.');
+    final enteredHost = host.text.trim(), enteredCode = code.text.trim();
+    if (enteredHost.isEmpty || !RegExp(r'^\d{6}$').hasMatch(enteredCode)) {
+      setState(
+        () => error =
+            'Scannez le QR ou renseignez l’adresse et le code professeur à 6 chiffres.',
+      );
       return;
     }
-    if (!RegExp(r'^\d{6}$').hasMatch(enteredCode)) {
-      setState(() => error = 'Saisissez le code professeur à 6 chiffres.');
-      return;
-    }
+    final run = ++attempt;
     setState(() {
       busy = true;
+      waiting = false;
       error = null;
-      status = 'Connexion à GESTCOURS Principal…';
+      status = 'Connexion au Principal…';
     });
-
-    final lanPermission = await PlatformPermissions.ensureLocalNetwork();
-    if (!lanPermission.mayProceed) {
-      if (mounted) {
+    try {
+      final permission = await PlatformPermissions.ensureLocalNetwork();
+      if (!mounted || run != attempt) return;
+      if (!permission.mayProceed) {
         setState(() {
           busy = false;
-          error = lanPermission.message;
-          status = 'Autorisation réseau local nécessaire.';
+          error = 'Autorisez le réseau local pour vous connecter au Principal.';
         });
+        return;
       }
-      return;
-    }
-
-    try {
-      final deviceId = await widget.store.getOrCreateDeviceId();
-      final c = await widget.api.pairAddress(
-        enteredHost,
-        enteredCode,
-        deviceId: deviceId,
-      );
-      if (mounted) {
-        setState(
-          () => status = 'Connexion trouvée. Synchronisation de vos classes…',
-        );
+      final device = await widget.store.getOrCreateDeviceId();
+      final deadline = DateTime.now().add(const Duration(minutes: 2));
+      while (mounted && run == attempt) {
+        try {
+          final config = await widget.api.pairAddress(
+            enteredHost,
+            enteredCode,
+            deviceId: device,
+            expectedPrincipalId: expectedPrincipalId,
+          );
+          if (!mounted || run != attempt) return;
+          setState(() {
+            waiting = false;
+            status = 'Connexion acceptée. Récupération de vos classes…';
+          });
+          final snapshot = await widget.api.sync(config, deviceId: device);
+          if (!mounted || run != attempt) return;
+          await widget.store.activateSession(config, snapshot);
+          if (!mounted || run != attempt) return;
+          widget.onConnected(config);
+          return;
+        } on PrincipalApprovalPendingException {
+          if (!mounted || run != attempt) return;
+          if (DateTime.now().isAfter(deadline)) {
+            setState(() {
+              busy = false;
+              waiting = false;
+              status =
+                  'La demande reste sur le Principal. Relancez la connexion après son acceptation.';
+            });
+            return;
+          }
+          setState(() {
+            waiting = true;
+            status =
+                'Demande envoyée. L’administration doit cliquer sur Accepter dans le tableau de bord du Principal.';
+          });
+          await Future<void>.delayed(const Duration(seconds: 3));
+        }
       }
-      final snapshot = await widget.api.sync(c, deviceId: deviceId);
-      await widget.store.activateSession(c, snapshot);
-      if (!mounted) return;
-      widget.onConnected(c);
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted || run != attempt) return;
       setState(() {
         busy = false;
-        error = e.toString();
+        waiting = false;
+        error = userMessage(e);
         status = 'Connexion non établie.';
       });
     }
@@ -103,28 +139,18 @@ class _SetupScreenState extends State<SetupScreen> {
     ).push<String>(MaterialPageRoute(builder: (_) => const _QrScanner()));
     if (result == null || !mounted) return;
     try {
-      final value = result.trim();
-      final p = value.split('|');
-      if (p.length == 5 && p[0] == 'ECOLEPRO') {
-        host.text = p[1].trim();
-        code.text = p[4].trim();
-        await connect();
-        return;
-      }
-      if (p.length >= 3 && p[0] == 'GESTCOURS') {
-        host.text = p[1].trim();
-        code.text = p[2].trim();
-        await connect();
-        return;
-      }
-      setState(() => error = 'QR GESTCOURS non reconnu.');
-    } catch (_) {
-      setState(() => error = 'QR GESTCOURS non reconnu.');
+      final qr = ConnectionQr.parse(result);
+      host.text = qr.address;
+      code.text = qr.code;
+      await connect(expectedPrincipalId: qr.principalId);
+    } catch (e) {
+      if (mounted) setState(() => error = userMessage(e));
     }
   }
 
   @override
   void dispose() {
+    attempt++;
     host.dispose();
     code.dispose();
     super.dispose();
@@ -202,7 +228,7 @@ class _SetupScreenState extends State<SetupScreen> {
                             ),
                             const SizedBox(height: 7),
                             Text(
-                              'Même Wi-Fi ou réseau local • adresse + code mémorisés après la première connexion',
+                              'Votre iPhone ou téléphone et le Principal doivent être sur le même Wi-Fi.',
                               textAlign: TextAlign.center,
                               style: TextStyle(
                                 color: Colors.white.withValues(alpha: .76),
@@ -213,6 +239,14 @@ class _SetupScreenState extends State<SetupScreen> {
                         ),
                       ),
                       const SizedBox(height: 22),
+                      FilledButton.icon(
+                        onPressed: busy ? null : scanQr,
+                        icon: const Icon(Icons.qr_code_scanner),
+                        label: const Text('Scanner le QR du Principal'),
+                      ),
+                      const SizedBox(height: 14),
+                      const Text('Ou saisir la connexion manuellement'),
+                      const SizedBox(height: 12),
                       TextField(
                         controller: host,
                         enabled: !busy,
@@ -298,19 +332,19 @@ class _SetupScreenState extends State<SetupScreen> {
                       ],
                       const SizedBox(height: 18),
                       FilledButton.icon(
-                        onPressed: busy ? null : connect,
+                        onPressed: busy ? null : () => connect(),
                         icon: const Icon(Icons.login_rounded),
                         label: Text(busy ? 'CONNEXION…' : 'SE CONNECTER'),
                       ),
                       const SizedBox(height: 10),
-                      OutlinedButton.icon(
-                        onPressed: busy ? null : scanQr,
-                        icon: const Icon(Icons.qr_code_scanner),
-                        label: const Text('Scanner un QR GESTCOURS (option)'),
-                      ),
+                      if (waiting)
+                        OutlinedButton(
+                          onPressed: _cancelWait,
+                          child: const Text('Annuler l’attente'),
+                        ),
                       const SizedBox(height: 14),
                       const Text(
-                        'L’adresse à recopier est affichée dans Principal > Réseau enseignants. Le port et votre nom ne sont pas à saisir.',
+                        'Le QR est disponible sur le tableau de bord du Principal : Connexion par QR. Chaque professeur a son propre code.',
                         textAlign: TextAlign.center,
                       ),
                     ],
@@ -337,6 +371,14 @@ class _QrScannerState extends State<_QrScanner> {
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(title: const Text('Scanner le QR GESTCOURS')),
     body: MobileScanner(
+      errorBuilder: (context, error) => const Center(
+        child: Padding(
+          padding: EdgeInsets.all(24),
+          child: Text(
+            'La caméra n’est pas accessible. Autorisez-la dans les réglages, ou revenez à la connexion manuelle.',
+          ),
+        ),
+      ),
       onDetect: (capture) {
         if (finished) return;
         final value = capture.barcodes.isNotEmpty

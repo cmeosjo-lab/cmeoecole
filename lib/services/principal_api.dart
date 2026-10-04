@@ -13,10 +13,17 @@ class PrincipalApiException implements Exception {
   String toString() => message;
 }
 
+class PrincipalApprovalPendingException extends PrincipalApiException {
+  PrincipalApprovalPendingException()
+    : super(
+        'Demande envoyée. L’administration doit l’accepter sur le tableau de bord du Principal.',
+      );
+}
+
 class PrincipalApi {
   static const int supportedProtocol = 6;
   static const int defaultPort = 47831;
-  static const String mobileVersion = '0.6.1';
+  static const String mobileVersion = '0.6.2';
   final Duration timeout;
 
   const PrincipalApi({this.timeout = const Duration(seconds: 8)});
@@ -56,11 +63,14 @@ class PrincipalApi {
     required String deviceId,
     int port = defaultPort,
     Duration? pairTimeout,
+    String expectedPrincipalId = '',
   }) async {
     try {
       final uri = Uri.parse('http://$host:$port/api/v1/pair').replace(
         queryParameters: {
           'code': code,
+          if (expectedPrincipalId.isNotEmpty)
+            'principalId': expectedPrincipalId,
           if (deviceId.trim().isNotEmpty) 'deviceId': deviceId.trim(),
           if (deviceId.trim().isNotEmpty) 'deviceName': deviceName,
         },
@@ -102,10 +112,20 @@ class PrincipalApi {
       if (!ok || teacher.isEmpty) {
         throw PrincipalApiException('Réponse du Principal invalide.');
       }
-      if (authorized == false) {
+      if (expectedPrincipalId.isNotEmpty &&
+          data['principalId'] != expectedPrincipalId) {
         throw PrincipalApiException(
-          'Cet appareil attend une autorisation ou est désactivé. Sur le Principal : Réseau enseignants > Appareils autorisés.',
+          'Ce QR ne correspond pas à cet établissement.',
         );
+      }
+      if (authorized == false) {
+        if (data['deviceStatus'] == 'refused' ||
+            data['deviceStatus'] == 'disabled') {
+          throw PrincipalApiException(
+            'Connexion refusée par l’administration.',
+          );
+        }
+        throw PrincipalApprovalPendingException();
       }
       return PrincipalConfig(
         host: host,
@@ -135,6 +155,7 @@ class PrincipalApi {
     String rawHost,
     String rawCode, {
     required String deviceId,
+    String expectedPrincipalId = '',
   }) async {
     final raw = rawHost.trim();
     final parsed = Uri.tryParse(raw.contains('://') ? raw : 'http://$raw');
@@ -166,6 +187,7 @@ class PrincipalApi {
       deviceId: deviceId,
       port: port,
       pairTimeout: const Duration(seconds: 3),
+      expectedPrincipalId: expectedPrincipalId,
     );
     if (found == null) {
       throw PrincipalApiException(

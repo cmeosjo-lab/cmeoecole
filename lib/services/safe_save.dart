@@ -1,3 +1,4 @@
+import 'user_message.dart';
 import 'package:flutter/material.dart';
 
 mixin SafeSave<T extends StatefulWidget> on State<T> {
@@ -13,7 +14,11 @@ mixin SafeSave<T extends StatefulWidget> on State<T> {
           SnackBar(
             duration: const Duration(seconds: 8),
             content: Text(
-              'Enregistrement impossible. Le formulaire reste ouvert. $e',
+              userMessage(
+                e,
+                fallback:
+                    'L’enregistrement n’a pas abouti. Vérifiez les champs puis réessayez. Le formulaire reste ouvert.',
+              ),
             ),
           ),
         );
