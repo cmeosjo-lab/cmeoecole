@@ -1,0 +1,95 @@
+name: GESTCOURS V0.6.3 - Android plume et tests natifs
+on:
+  workflow_dispatch:
+  push:
+    branches: ['build/v0.6.3-plume-android-validation']
+permissions:
+  contents: read
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v5
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.5'
+          channel: stable
+          cache: true
+      - name: Preparer Android et la plume approuvee
+        shell: bash
+        run: |
+          python3 -m venv "$RUNNER_TEMP/icons"
+          "$RUNNER_TEMP/icons/bin/pip" install Pillow==11.3.0
+          rm -rf android
+          flutter create --no-pub --platforms=android --org fr.ecolegestion --project-name ecole_gestion_prof_mobile .
+          git restore --source=HEAD -- lib test pubspec.yaml pubspec.lock analysis_options.yaml
+          rm -f test/widget_test.dart
+          python3 ci/patch_android.py
+          "$RUNNER_TEMP/icons/bin/python" ci/apply_plume.py
+          mkdir -p dist
+          flutter pub get --enforce-lockfile
+          flutter analyze lib test 2>&1 | tee dist/analyze.txt
+          flutter test test --reporter expanded 2>&1 | tee dist/tests.txt
+      - name: Compiler et verifier les APK de diffusion
+        shell: bash
+        run: |
+          flutter build apk --release --no-pub
+          cp build/app/outputs/flutter-apk/app-release.apk dist/GESTCOURS_PROF_ANDROID_V0_6_3_UNIVERSEL_A_SIGNER.apk
+          GESTCOURS_ARM64_ONLY=1 flutter build apk --release --no-pub --target-platform android-arm64
+          cp build/app/outputs/flutter-apk/app-release.apk dist/GESTCOURS_PROF_ANDROID_V0_6_3_ARM64_A_SIGNER.apk
+          BT=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)
+          cp "$BT/lib/apksigner.jar" "$BT/aapt" "$BT/zipalign" dist/
+          for APK in dist/*.apk; do
+            "$BT/apksigner" verify --verbose --print-certs "$APK" >> dist/apk-check.txt
+            "$BT/aapt" dump badging "$APK" > "$RUNNER_TEMP/badging.txt"
+            cat "$RUNNER_TEMP/badging.txt" >> dist/apk-check.txt
+            grep -q "versionCode='17' versionName='0.6.3'" "$RUNNER_TEMP/badging.txt"
+            if grep -q application-debuggable "$RUNNER_TEMP/badging.txt"; then exit 1; fi
+            if [[ "$APK" == *ARM64* ]]; then grep -Eq "^native-code: 'arm64-v8a'[[:space:]]*$" "$RUNNER_TEMP/badging.txt"; fi
+          done
+          cp android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png dist/icone_android.png
+          tar -czf dist/sources-mobiles-v063.tar.gz lib test integration_test pubspec.yaml pubspec.lock analysis_options.yaml ci branding
+          git rev-parse HEAD > dist/SOURCE_COMMIT.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GESTCOURS_ANDROID_V063_BINAIRES
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
+      - name: Preparer les essais Android natifs
+        shell: bash
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          sudo chmod 666 /dev/kvm
+          flutter pub add --dev integration_test --sdk=flutter
+          flutter analyze integration_test
+      - name: Demarrage APK release et tests natifs
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          disable-animations: true
+          emulator-boot-timeout: 600
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: |
+            adb install -r dist/GESTCOURS_PROF_ANDROID_V0_6_3_UNIVERSEL_A_SIGNER.apk
+            adb shell am start -W -n fr.ecolegestion.ecole_gestion_prof_mobile/.MainActivity
+            sleep 8
+            adb shell uiautomator dump /sdcard/gestcours-start.xml
+            adb pull /sdcard/gestcours-start.xml dist/startup.xml
+            adb exec-out screencap -p > dist/startup.png
+            grep -q 'Connexion au Principal' dist/startup.xml
+            bash -o pipefail -c 'flutter test integration_test -d emulator-5554 --reporter expanded 2>&1 | tee dist/native-tests.txt'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: GESTCOURS_ANDROID_V063_PREUVES_NATIVES
+          path: |
+            dist/startup.*
+            dist/native-tests.txt
+          if-no-files-found: warn
+          retention-days: 30
