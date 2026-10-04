@@ -1,0 +1,158 @@
+name: GESTCOURS V0.6.2 - suivi simple et QR
+on:
+  workflow_dispatch:
+  push:
+    branches: ['feature/simple-suivi-qr-v0.6.2']
+permissions:
+  contents: read
+concurrency:
+  group: gestcours-v062-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  qr-library:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          mkdir -p dist
+          curl --fail --location --retry 3 'https://proxy.golang.org/github.com/skip2/go-qrcode/@v/v0.0.0-20200617195104-da1b6568686e.zip' -o dist/qrcode-library.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: QR_ENCODER_SOURCE_LICENSE
+          path: dist/
+  validate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      sha: ${{ steps.source.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.ref_name }}
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.5'
+          channel: stable
+          cache: true
+      - name: Appliquer le changement ciblé
+        run: |
+          python3 ci/apply_user_v062.py
+          python3 ci/native_suivi_v062.py
+          flutter pub get --enforce-lockfile
+          dart format lib test integration_test
+      - id: source
+        name: Conserver les sources exactes
+        shell: bash
+        run: |
+          git config user.name 'GESTCOURS Build'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add lib test integration_test pubspec.yaml
+          if ! git diff --cached --quiet; then
+            git commit -m 'V0.6.2+16: suivi remis à zéro sans effacement et attente autorisation QR'
+            git push origin HEAD:${GITHUB_REF_NAME}
+          fi
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          mkdir -p dist
+          git archive --format=zip -o dist/GESTCOURS_V0_6_2_SOURCES.zip HEAD
+      - name: Analyse stricte et tests
+        shell: bash
+        run: |
+          flutter analyze lib test 2>&1 | tee dist/analyse.txt
+          flutter test test --reporter expanded 2>&1 | tee dist/tests.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: GESTCOURS_V062_SOURCES_TESTS
+          path: dist/
+  android:
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.validate.outputs.sha }}
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.5'
+          channel: stable
+          cache: true
+      - name: Préparer et compiler Android sans modifier les dépendances validées
+        shell: bash
+        run: |
+          rm -rf android
+          flutter create --no-pub --platforms=android --org fr.ecolegestion --project-name ecole_gestion_prof_mobile .
+          git restore -- lib test pubspec.yaml pubspec.lock analysis_options.yaml
+          rm -f test/widget_test.dart
+          python3 ci/patch_android.py
+          flutter pub get --enforce-lockfile
+          mkdir -p dist
+          flutter build apk --release --no-pub
+          cp build/app/outputs/flutter-apk/app-release.apk dist/GESTCOURS_PROF_ANDROID_V0_6_2_UNIVERSEL_VALIDATION.apk
+          GESTCOURS_ARM64_ONLY=1 flutter build apk --release --target-platform android-arm64 --no-pub
+          cp build/app/outputs/flutter-apk/app-release.apk dist/GESTCOURS_PROF_ANDROID_V0_6_2_ARM64_VALIDATION.apk
+          BT=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)
+          cp "$BT/lib/apksigner.jar" dist/apksigner.jar
+          for APK in dist/*.apk; do
+            "$BT/apksigner" verify --verbose --print-certs "$APK" >> dist/apk-inspection.txt
+            "$BT/aapt" dump badging "$APK" >> dist/apk-inspection.txt
+          done
+      - name: Préparer les essais Android natifs
+        shell: bash
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          flutter pub add --dev integration_test --sdk=flutter
+          flutter analyze integration_test
+          sed -i 's/V0_6_1/V0_6_2/g; s/Connexion au Principal/Connexion à votre établissement/g' ci/android_startup_smoke.sh
+      - name: Ouvrir APK release et tester conservation des saisies sur Android
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: |
+            bash ci/android_startup_smoke.sh
+            bash -o pipefail -c 'flutter test integration_test/sqlite_startup_test.dart -d emulator-5554 --reporter expanded 2>&1 | tee dist/android-native-tests.txt'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: GESTCOURS_ANDROID_V062_BUILD_TESTS
+          path: dist/
+          if-no-files-found: error
+  ios:
+    needs: validate
+    runs-on: macos-15
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.validate.outputs.sha }}
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.5'
+          channel: stable
+          cache: true
+      - name: Compiler iOS sans changer les dépendances vérifiées
+        shell: bash
+        run: |
+          rm -rf ios
+          flutter create --no-pub --platforms=ios --org fr.ecolegestion --project-name ecole_gestion_prof_mobile .
+          git restore -- lib test pubspec.yaml pubspec.lock analysis_options.yaml
+          rm -f test/widget_test.dart
+          python3 ci/patch_ios.py
+          flutter pub get --enforce-lockfile
+          flutter build ios --release --no-codesign --no-pub
+          mkdir -p dist "$RUNNER_TEMP/gestcours-ipa/Payload"
+          cp -R build/ios/iphoneos/Runner.app "$RUNNER_TEMP/gestcours-ipa/Payload/Runner.app"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' build/ios/iphoneos/Runner.app/Info.plist > dist/ios-version.txt
+          OUT="$PWD/dist/GESTCOURS_PROF_IOS_V0_6_2_A_SIGNER.ipa"
+          (cd "$RUNNER_TEMP/gestcours-ipa" && zip -qry "$OUT" Payload)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GESTCOURS_IOS_V062_A_SIGNER
+          path: dist/
+          if-no-files-found: error
