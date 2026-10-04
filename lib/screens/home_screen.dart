@@ -5,6 +5,7 @@ import '../models/school_data.dart';
 import '../services/local_store.dart';
 import '../services/principal_api.dart';
 import '../services/sync_coordinator.dart';
+import '../services/friendly_message.dart';
 import '../widgets/school_header.dart';
 import 'classes_screen.dart';
 
@@ -57,7 +58,7 @@ class _HomeScreenState extends State<HomeScreen> {
       final config = await widget.store.loadConfig();
       final s = await widget.store.loadSnapshot();
       final q = await widget.store.loadQueue();
-      final h = await widget.store.loadTransmissionHistory();
+      final h = await widget.store.loadDashboardHistory();
       final last = await widget.store.lastSuccessfulSync();
       if (!mounted || generation != _generation) return;
       setState(() {
@@ -71,7 +72,7 @@ class _HomeScreenState extends State<HomeScreen> {
         refused = h.where((e) => e.status == 'refused').length;
       });
     } catch (e) {
-      if (mounted) setState(() => localError = e.toString());
+      if (mounted) setState(() => localError = friendlyMessage(e));
     }
   }
 
@@ -168,6 +169,11 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
             actions: [
+              TextButton.icon(
+                onPressed: _resetCounters,
+                icon: const Icon(Icons.restart_alt),
+                label: const Text('Remettre les compteurs à zéro'),
+              ),
               TextButton(
                 onPressed: () => Navigator.pop(dialogContext),
                 child: const Text('Fermer'),
@@ -179,35 +185,44 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Future<void> _log() async {
-    final logs = await widget.store.loadSyncLog();
-    if (!mounted) return;
-    await showDialog<void>(
+  Future<void> _resetCounters() async {
+    final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Diagnostic de synchronisation'),
-        content: SizedBox(
-          width: 640,
-          height: 400,
-          child: SingleChildScrollView(
-            child: SelectableText(logs.reversed.join('\n\n')),
-          ),
+        title: const Text('Remettre les compteurs à zéro ?'),
+        content: const Text(
+          'Les compteurs Reçues, Validées et Refusées seront remis à zéro.\n\nL’historique est conservé. Les saisies à envoyer ne sont ni effacées ni masquées. Une nouvelle décision du Principal apparaîtra à nouveau.',
         ),
         actions: [
           TextButton(
-            onPressed: () async {
-              await widget.store.clearSyncLog();
-              if (context.mounted) Navigator.pop(context);
-            },
-            child: const Text('Vider le journal'),
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Annuler'),
           ),
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Fermer'),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Remettre à zéro'),
           ),
         ],
       ),
     );
+    if (confirmed != true) return;
+    try {
+      await widget.store.resetDashboardCounters();
+      await _refresh();
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Compteurs remis à zéro. Historique et saisies conservés.',
+            ),
+          ),
+        );
+    } catch (e) {
+      if (mounted)
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(friendlyMessage(e))));
+    }
   }
 
   Future<void> _backup() async {
@@ -227,7 +242,7 @@ class _HomeScreenState extends State<HomeScreen> {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('Sauvegarde impossible : $e')));
+        ).showSnackBar(SnackBar(content: Text(friendlyMessage(e))));
       }
     }
   }
@@ -238,7 +253,7 @@ class _HomeScreenState extends State<HomeScreen> {
       final raw = await showDialog<String>(
         context: context,
         builder: (context) => AlertDialog(
-          title: const Text('Restaurer une sauvegarde V2.4'),
+          title: const Text('Restaurer une sauvegarde'),
           content: TextField(
             controller: field,
             maxLines: 8,
@@ -274,7 +289,7 @@ class _HomeScreenState extends State<HomeScreen> {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text('Restauration annulée : $e')));
+        ).showSnackBar(SnackBar(content: Text(friendlyMessage(e))));
       }
     } finally {
       field.dispose();
@@ -357,7 +372,7 @@ class _HomeScreenState extends State<HomeScreen> {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(SnackBar(content: Text(e.toString())));
+        ).showSnackBar(SnackBar(content: Text(friendlyMessage(e))));
       }
     }
   }
@@ -366,7 +381,9 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     final c = widget.coordinator;
     final s = snapshot;
-    final error = localError ?? c.lastError;
+    final error =
+        localError ??
+        (c.lastError == null ? null : friendlyMessage(c.lastError!));
     final headline = localError != null
         ? 'Attention : stockage local'
         : c.busy
@@ -387,8 +404,6 @@ class _HomeScreenState extends State<HomeScreen> {
                   await _changeAddress();
                 case 'history':
                   await _history();
-                case 'log':
-                  await _log();
                 case 'backup':
                   await _backup();
                 case 'restore':
@@ -402,7 +417,6 @@ class _HomeScreenState extends State<HomeScreen> {
                 value: 'history',
                 child: Text('Suivi des saisies'),
               ),
-              const PopupMenuItem(value: 'log', child: Text('Diagnostic')),
               PopupMenuItem(
                 value: 'address',
                 enabled: !c.busy,
@@ -491,7 +505,7 @@ class _HomeScreenState extends State<HomeScreen> {
               Card(
                 child: ListTile(
                   onTap: _history,
-                  title: const Text('Décisions du Principal'),
+                  title: const Text('Suivi des saisies'),
                   subtitle: Text(
                     '$received à valider · $accepted validée(s) · $refused refusée(s)',
                   ),
@@ -529,22 +543,6 @@ class _HomeScreenState extends State<HomeScreen> {
                 'Envoi automatique après vos saisies et au retour dans l’application. Le PC Principal doit rester ouvert sur le même réseau local.',
               ),
               const SizedBox(height: 14),
-              ExpansionTile(
-                title: const Text('Informations techniques'),
-                children: [
-                  ListTile(
-                    title: const Text('GESTCOURS Mobile V0.6.0 · Pack V2.4'),
-                    subtitle: Text(
-                      'Connexion : ${actualConfig?.host ?? widget.config.host}:${actualConfig?.port ?? widget.config.port}\nStockage local transactionnel SQLite',
-                    ),
-                  ),
-                  ListTile(
-                    title: const Text('Ouvrir le diagnostic'),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: _log,
-                  ),
-                ],
-              ),
               const SizedBox(height: 30),
             ],
           ),

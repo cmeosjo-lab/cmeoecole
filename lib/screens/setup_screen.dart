@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
@@ -5,6 +6,8 @@ import '../models/principal_config.dart';
 import '../services/local_store.dart';
 import '../services/principal_api.dart';
 import '../services/platform_permissions.dart';
+import '../services/connection_qr.dart';
+import '../services/friendly_message.dart';
 
 class SetupScreen extends StatefulWidget {
   final LocalStore store;
@@ -24,9 +27,13 @@ class _SetupScreenState extends State<SetupScreen> {
   final host = TextEditingController();
   final code = TextEditingController();
   bool busy = false;
+  bool waiting = false;
+  int _attempt = 0;
+  String _expectedPrincipalId = '';
+  Completer<void>? _cancel;
   String? error;
   String status =
-      'Recopiez l’adresse affichée dans GESTCOURS Principal, puis votre code professeur.';
+      'Scannez votre QR de connexion affiché sur le PC Principal, ou saisissez votre adresse et votre code.';
 
   @override
   void initState() {
@@ -37,11 +44,16 @@ class _SetupScreenState extends State<SetupScreen> {
   Future<void> _loadPrevious() async {
     final previous = await widget.store.loadConfig();
     if (!mounted || previous == null) return;
-    host.text = previous.host;
+    host.text = previous.port == PrincipalApi.defaultPort
+        ? previous.host
+        : '${previous.host}:${previous.port}';
     code.text = previous.code;
   }
 
   Future<void> connect() async {
+    if (busy) return;
+    final attempt = ++_attempt;
+    _cancel = Completer<void>();
     FocusScope.of(context).unfocus();
     final enteredHost = host.text.trim();
     final enteredCode = code.text.trim();
@@ -73,25 +85,57 @@ class _SetupScreenState extends State<SetupScreen> {
 
     try {
       final deviceId = await widget.store.getOrCreateDeviceId();
-      final c = await widget.api.pairAddress(
-        enteredHost,
-        enteredCode,
-        deviceId: deviceId,
-      );
-      if (mounted) {
-        setState(
-          () => status = 'Connexion trouvée. Synchronisation de vos classes…',
+      PrincipalConfig? approved;
+      final deadline = DateTime.now().add(const Duration(minutes: 3));
+      while (mounted && attempt == _attempt) {
+        try {
+          approved = await widget.api.pairAddress(
+            enteredHost,
+            enteredCode,
+            deviceId: deviceId,
+          );
+          break;
+        } on PrincipalApprovalPending {
+          if (!mounted || attempt != _attempt) return;
+          setState(() {
+            waiting = true;
+            status =
+                'Demande envoyée. En attente de l’accord du responsable sur le Principal…';
+          });
+          if (DateTime.now().isAfter(deadline))
+            throw PrincipalApiException(
+              'L’accord n’a pas encore été donné. Relancez la connexion après l’acceptation sur le Principal.',
+            );
+          await Future.any([
+            Future<void>.delayed(const Duration(seconds: 3)),
+            _cancel!.future,
+          ]);
+        }
+      }
+      if (!mounted || attempt != _attempt || approved == null) return;
+      final c = approved;
+      if (_expectedPrincipalId.isNotEmpty &&
+          c.principalId != _expectedPrincipalId)
+        throw PrincipalApiException(
+          'Ce QR ne correspond plus au Principal. Demandez un nouveau QR au responsable.',
         );
+      if (mounted) {
+        setState(() {
+          waiting = false;
+          status = 'Connexion trouvée. Synchronisation de vos classes…';
+        });
       }
       final snapshot = await widget.api.sync(c, deviceId: deviceId);
+      if (!mounted || attempt != _attempt) return;
       await widget.store.activateSession(c, snapshot);
       if (!mounted) return;
       widget.onConnected(c);
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted || attempt != _attempt) return;
       setState(() {
         busy = false;
-        error = e.toString();
+        waiting = false;
+        error = friendlyMessage(e);
         status = 'Connexion non établie.';
       });
     }
@@ -103,28 +147,30 @@ class _SetupScreenState extends State<SetupScreen> {
     ).push<String>(MaterialPageRoute(builder: (_) => const _QrScanner()));
     if (result == null || !mounted) return;
     try {
-      final value = result.trim();
-      final p = value.split('|');
-      if (p.length == 5 && p[0] == 'ECOLEPRO') {
-        host.text = p[1].trim();
-        code.text = p[4].trim();
-        await connect();
-        return;
-      }
-      if (p.length >= 3 && p[0] == 'GESTCOURS') {
-        host.text = p[1].trim();
-        code.text = p[2].trim();
-        await connect();
-        return;
-      }
-      setState(() => error = 'QR GESTCOURS non reconnu.');
+      final qr = ConnectionQr.parse(result);
+      host.text = qr.address;
+      code.text = qr.code;
+      _expectedPrincipalId = qr.principalId;
+      await connect();
     } catch (_) {
       setState(() => error = 'QR GESTCOURS non reconnu.');
     }
   }
 
+  void _cancelConnection() {
+    _attempt++;
+    if (_cancel != null && !_cancel!.isCompleted) _cancel!.complete();
+    setState(() {
+      busy = false;
+      waiting = false;
+      status = 'Connexion interrompue. Vous pouvez réessayer.';
+    });
+  }
+
   @override
   void dispose() {
+    _attempt++;
+    if (_cancel != null && !_cancel!.isCompleted) _cancel!.complete();
     host.dispose();
     code.dispose();
     super.dispose();
@@ -213,8 +259,20 @@ class _SetupScreenState extends State<SetupScreen> {
                         ),
                       ),
                       const SizedBox(height: 22),
+                      FilledButton.icon(
+                        onPressed: busy ? null : scanQr,
+                        icon: const Icon(Icons.qr_code_scanner),
+                        label: const Text('Scanner mon QR de connexion'),
+                      ),
+                      const SizedBox(height: 14),
+                      const Text(
+                        'Ou connexion avec une adresse et un code',
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 12),
                       TextField(
                         controller: host,
+                        onChanged: (_) => _expectedPrincipalId = '',
                         enabled: !busy,
                         keyboardType: TextInputType.url,
                         decoration: const InputDecoration(
@@ -226,6 +284,7 @@ class _SetupScreenState extends State<SetupScreen> {
                       const SizedBox(height: 12),
                       TextField(
                         controller: code,
+                        onChanged: (_) => _expectedPrincipalId = '',
                         enabled: !busy,
                         textAlign: TextAlign.center,
                         keyboardType: TextInputType.number,
@@ -303,14 +362,16 @@ class _SetupScreenState extends State<SetupScreen> {
                         label: Text(busy ? 'CONNEXION…' : 'SE CONNECTER'),
                       ),
                       const SizedBox(height: 10),
-                      OutlinedButton.icon(
-                        onPressed: busy ? null : scanQr,
-                        icon: const Icon(Icons.qr_code_scanner),
-                        label: const Text('Scanner un QR GESTCOURS (option)'),
-                      ),
+                      if (waiting)
+                        TextButton(
+                          onPressed: _cancelConnection,
+                          child: const Text(
+                            'Annuler la demande sur ce téléphone',
+                          ),
+                        ),
                       const SizedBox(height: 14),
                       const Text(
-                        'L’adresse à recopier est affichée dans Principal > Réseau enseignants. Le port et votre nom ne sont pas à saisir.',
+                        'L’adresse à recopier est affichée dans Principal > Réseau enseignants. Le responsable peut aussi y afficher votre QR personnel.',
                         textAlign: TextAlign.center,
                       ),
                     ],

@@ -212,6 +212,9 @@ class LocalStore extends ChangeNotifier {
             where: 'scope = ?',
             whereArgs: [oldScope],
           );
+          final oldSeen = await _get(tx, 'dashboard_seen:$oldScope');
+          if (oldSeen != null)
+            await _put(tx, 'dashboard_seen:${cfg.scopeKey}', oldSeen);
           final oldSnapshot = await _get(tx, 'snapshot:$oldScope');
           if (oldSnapshot != null) {
             await _put(tx, 'snapshot:${cfg.scopeKey}', oldSnapshot);
@@ -304,6 +307,50 @@ class LocalStore extends ChangeNotifier {
       orderBy: 'created_at, id',
     );
     return rows.map(_event).toList();
+  }
+
+  /// A reset affects only the dashboard. Events remain in full history and the
+  /// sync service keeps polling received records until their final decision.
+  Future<List<TeacherEvent>> loadDashboardHistory() async {
+    final d = await _db;
+    return d.transaction((tx) async {
+      final scope = await _scope(tx);
+      final raw = await _get(tx, 'dashboard_seen:$scope');
+      final seen = raw == null ? <String, dynamic>{} : _object(raw);
+      final rows = await tx.query(
+        'events',
+        where: "scope = ? AND status != 'pending'",
+        whereArgs: [scope],
+        orderBy: 'created_at, id',
+      );
+      return rows
+          .where((row) => seen[row['id']] != row['status'])
+          .map(_event)
+          .toList();
+    });
+  }
+
+  Future<int> resetDashboardCounters() async {
+    final d = await _db;
+    final count = await d.transaction((tx) async {
+      final scope = await _scope(tx);
+      final rows = await tx.query(
+        'events',
+        columns: ['id', 'status'],
+        where: "scope = ? AND status != 'pending'",
+        whereArgs: [scope],
+      );
+      await _put(
+        tx,
+        'dashboard_seen:$scope',
+        jsonEncode({
+          for (final row in rows) row['id'] as String: row['status'],
+        }),
+      );
+      return rows.length;
+    });
+    _changed();
+    return count;
   }
 
   Future<void> enqueue(TeacherEvent event) => enqueueMany([event]);

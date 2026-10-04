@@ -13,10 +13,17 @@ class PrincipalApiException implements Exception {
   String toString() => message;
 }
 
+class PrincipalApprovalPending extends PrincipalApiException {
+  PrincipalApprovalPending()
+    : super(
+        'Demande envoyée. Le responsable doit accepter votre connexion sur le tableau de bord du Principal.',
+      );
+}
+
 class PrincipalApi {
   static const int supportedProtocol = 6;
   static const int defaultPort = 47831;
-  static const String mobileVersion = '0.6.1';
+  static const String mobileVersion = '0.6.2';
   final Duration timeout;
 
   const PrincipalApi({this.timeout = const Duration(seconds: 8)});
@@ -103,9 +110,18 @@ class PrincipalApi {
         throw PrincipalApiException('Réponse du Principal invalide.');
       }
       if (authorized == false) {
-        throw PrincipalApiException(
-          'Cet appareil attend une autorisation ou est désactivé. Sur le Principal : Réseau enseignants > Appareils autorisés.',
-        );
+        final state = (data['deviceStatus'] ?? 'pending').toString();
+        if (state == 'refused') {
+          throw PrincipalApiException(
+            'La connexion a été refusée. Contactez le responsable de l’établissement.',
+          );
+        }
+        if (state == 'disabled') {
+          throw PrincipalApiException(
+            'Cet appareil est désactivé. Contactez le responsable de l’établissement.',
+          );
+        }
+        throw PrincipalApprovalPending();
       }
       return PrincipalConfig(
         host: host,
