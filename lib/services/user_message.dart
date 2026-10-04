@@ -28,8 +28,9 @@ String userMessage(Object error, {String? fallback}) {
   if (text.contains('non transmises') || text.contains('restent à envoyer')) {
     return 'Des saisies restent à envoyer. Synchronisez avant de vous déconnecter.';
   }
-  if (text.contains('qr'))
+  if (text.contains('qr')) {
     return 'Ce QR n’est pas un code de connexion GESTCOURS valide.';
+  }
   if (text.contains('autre professeur') ||
       text.contains('établissement différent') ||
       text.contains('ne correspond pas')) {

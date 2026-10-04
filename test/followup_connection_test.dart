@@ -196,6 +196,8 @@ void main() {
   test(
     'pair pending, refusal, acceptance and QR Principal identity are enforced',
     () async {
+      final previousOverrides = HttpOverrides.global;
+      HttpOverrides.global = null;
       final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
       var state = 'pending';
       var principal = 'GC-TEST';
@@ -237,6 +239,7 @@ void main() {
       } finally {
         await subscription.cancel();
         await server.close(force: true);
+        HttpOverrides.global = previousOverrides;
       }
     },
   );

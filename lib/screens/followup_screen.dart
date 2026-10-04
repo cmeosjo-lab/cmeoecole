@@ -41,8 +41,9 @@ class _FollowupScreenState extends State<FollowupScreen> {
         error = null;
       });
     } catch (e) {
-      if (mounted && request == generation)
+      if (mounted && request == generation) {
         setState(() => error = userMessage(e));
+      }
     }
   }
 
@@ -86,10 +87,11 @@ class _FollowupScreenState extends State<FollowupScreen> {
         );
       }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text(userMessage(e))));
+      }
     } finally {
       if (mounted) setState(() => resetting = false);
     }
