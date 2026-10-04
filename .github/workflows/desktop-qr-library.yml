@@ -1,0 +1,31 @@
+name: GESTCOURS - bibliotheque QR locale
+on:
+  workflow_dispatch:
+  push:
+    branches: ['release/v0.6.2-connexion-suivi']
+    paths: ['.github/workflows/desktop-qr-library.yml']
+permissions:
+  contents: read
+jobs:
+  qr:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.2'
+      - name: Recuperer la bibliotheque MIT figee et ses sources
+        shell: bash
+        run: |
+          mkdir -p qr dist
+          cd qr
+          go mod init gestcours/qrdependencies
+          go get github.com/skip2/go-qrcode@v0.0.0-20200617195104-da1b6568686e
+          printf 'package main\nimport qrcode "github.com/skip2/go-qrcode"\nfunc main(){_,err:=qrcode.New("GESTCOURS|192.0.2.1:47831|123456|SYNTHETIC",qrcode.Medium);if err!=nil{panic(err)}}\n' > main.go
+          go mod vendor
+          go run .
+          zip -qr ../dist/qr-vendor.zip vendor go.mod go.sum
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GESTCOURS_QR_VENDOR_MIT
+          path: dist/qr-vendor.zip
+          retention-days: 30
