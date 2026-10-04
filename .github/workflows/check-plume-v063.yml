@@ -1,0 +1,61 @@
+name: GESTCOURS V0.6.3 - validation APK plume
+on:
+  workflow_dispatch:
+  push:
+    branches: ['release/v0.6.3-plume']
+    paths: ['.github/workflows/check-plume-v063.yml']
+permissions:
+  contents: read
+  actions: read
+jobs:
+  native-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: '524aaeea46d8e737bd7d44c050add808941e8284'
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: 37231324368
+          artifact-ids: 11313964275
+          path: incoming
+          merge-multiple: true
+      - name: Activer KVM
+        shell: bash
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          mkdir -p checks
+          sha256sum incoming/*.apk > checks/APK_TESTEES.sha256
+      - name: Ouvrir la véritable APK release et vérifier son écran
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          disable-animations: true
+          emulator-boot-timeout: 600
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: |
+            adb install -r incoming/GESTCOURS_PROF_ANDROID_V0_6_3_UNIVERSEL_A_SIGNER.apk
+            adb shell am start -W -n fr.ecolegestion.ecole_gestion_prof_mobile/.MainActivity
+            sleep 10
+            adb shell uiautomator dump /sdcard/gestcours-start.xml
+            adb pull /sdcard/gestcours-start.xml checks/startup.xml
+            adb exec-out screencap -p > checks/startup.png
+            grep -q 'Connexion au Principal' checks/startup.xml
+            adb shell input keyevent 3
+            sleep 3
+            adb shell monkey -p com.google.android.apps.nexuslauncher -c android.intent.category.LAUNCHER 1 || true
+            adb exec-out screencap -p > checks/launcher.png
+            adb logcat -d -t 300 > checks/logcat.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: GESTCOURS_V063_VALIDATION_NATIVE
+          path: checks/
+          if-no-files-found: error
+          retention-days: 30
