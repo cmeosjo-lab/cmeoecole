@@ -10,7 +10,7 @@ defaults:
     shell: bash
 concurrency:
   group: gestcours-v062-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
   validate:
     runs-on: ubuntu-latest
@@ -61,7 +61,7 @@ jobs:
   android:
     needs: validate
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v5
         with:
@@ -116,8 +116,8 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           script: |
             bash ci/android_startup_smoke.sh
-            bash -o pipefail -c 'flutter test integration_test/sqlite_startup_test.dart -d emulator-5554 --reporter expanded 2>&1 | tee dist/android-sqlite-tests.txt'
-            bash -o pipefail -c 'flutter test integration_test/connection_followup_test.dart -d emulator-5554 --reporter expanded 2>&1 | tee dist/android-connection-tests.txt'
+            bash -o pipefail -c 'timeout 420s flutter test integration_test/sqlite_startup_test.dart -d emulator-5554 --reporter expanded 2>&1 | tee dist/android-sqlite-tests.txt'
+            bash -o pipefail -c 'timeout 300s flutter test integration_test/connection_followup_test.dart -d emulator-5554 --reporter expanded 2>&1 | tee dist/android-connection-tests.txt'
       - uses: actions/upload-artifact@v4
         if: always()
         with:
