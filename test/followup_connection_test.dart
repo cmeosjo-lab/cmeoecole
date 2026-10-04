@@ -260,12 +260,16 @@ void main() {
   testWidgets('followup fits a small screen and reset asks before archiving', (
     tester,
   ) async {
-    await seed();
+    await tester.runAsync(seed);
     tester.view.physicalSize = const Size(360, 800);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
     await tester.pumpWidget(MaterialApp(home: FollowupScreen(store: store)));
+    await tester.runAsync(() async {
+      await store.loadFollowup();
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+    });
     await tester.pumpAndSettle();
     expect(find.text('Suivi des saisies'), findsOneWidget);
     expect(tester.takeException(), isNull);
@@ -274,7 +278,7 @@ void main() {
     expect(find.text('Remettre le suivi à zéro ?'), findsOneWidget);
     await tester.tap(find.text('Annuler'));
     await tester.pumpAndSettle();
-    expect((await store.loadFollowup()).length, 4);
+    expect((await tester.runAsync(() => store.loadFollowup()))!.length, 4);
     await tester.pumpWidget(const SizedBox.shrink());
-  });
+  }, timeout: const Timeout(Duration(minutes: 1)));
 }
