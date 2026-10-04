@@ -75,8 +75,9 @@ class _SetupScreenState extends State<SetupScreen> {
     try {
       final permission = await PlatformPermissions.ensureLocalNetwork();
       if (!active()) return;
-      if (!permission.mayProceed)
+      if (!permission.mayProceed) {
         throw PrincipalApiException(permission.message);
+      }
       final deviceId = await widget.store.getOrCreateDeviceId();
       final deadline = DateTime.now().add(const Duration(minutes: 2));
       while (active()) {
@@ -100,10 +101,11 @@ class _SetupScreenState extends State<SetupScreen> {
           return;
         } on PrincipalApprovalPending {
           if (!active()) return;
-          if (DateTime.now().isAfter(deadline))
+          if (DateTime.now().isAfter(deadline)) {
             throw PrincipalApiException(
               'La demande attend toujours le responsable. Après son accord, appuyez sur Se connecter.',
             );
+          }
           setState(() {
             waiting = true;
             status =
@@ -113,17 +115,19 @@ class _SetupScreenState extends State<SetupScreen> {
         }
       }
     } catch (e) {
-      if (active())
+      if (active()) {
         setState(() {
           error = userMessage(e);
           status = 'Connexion non établie.';
         });
+      }
     } finally {
-      if (active())
+      if (active()) {
         setState(() {
           busy = false;
           waiting = false;
         });
+      }
     }
   }
 
@@ -138,11 +142,12 @@ class _SetupScreenState extends State<SetupScreen> {
       code.text = qr.code;
       await connect(expectedPrincipalId: qr.principalId);
     } on FormatException {
-      if (mounted)
+      if (mounted) {
         setState(
           () => error =
               'Ce QR n’est pas un QR de connexion GESTCOURS. Demandez-le au responsable.',
         );
+      }
     }
   }
 

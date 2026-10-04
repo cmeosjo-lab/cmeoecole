@@ -17,7 +17,8 @@ String userMessage(
   }
   if (lower.contains('http') ||
       lower.contains('stacktrace') ||
-      lower.contains('pragma'))
+      lower.contains('pragma')) {
     return fallback;
+  }
   return text.replaceFirst(RegExp(r'^(Bad state: |Exception: )'), '');
 }

@@ -29,8 +29,9 @@ class ConnectionQr {
         final u = Uri.tryParse('http://${parts[1]}');
         if (u == null ||
             u.userInfo.isNotEmpty ||
-            (u.path.isNotEmpty && u.path != '/'))
+            (u.path.isNotEmpty && u.path != '/')) {
           throw const FormatException('QR non reconnu');
+        }
         host = u.host;
         port = u.hasPort ? u.port : 47831;
         code = parts[2];
@@ -55,8 +56,9 @@ class ConnectionQr {
         port < 1 ||
         port > 65535 ||
         !RegExp(r'^\d{6}$').hasMatch(code) ||
-        principalId.length > 128)
+        principalId.length > 128) {
       throw const FormatException('QR non reconnu');
+    }
     return ConnectionQr(host, port, code, principalId);
   }
 }

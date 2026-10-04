@@ -52,11 +52,12 @@ class _TransmissionScreenState extends State<TransmissionScreen> {
         loaded = true;
       });
     } catch (e) {
-      if (mounted && gen == generation)
+      if (mounted && gen == generation) {
         setState(() {
           error = userMessage(e);
           loaded = true;
         });
+      }
     }
   }
 
@@ -91,17 +92,19 @@ class _TransmissionScreenState extends State<TransmissionScreen> {
         filter = 'all';
       });
       await refresh();
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Suivi remis à zéro. Les saisies sont conservées.'),
           ),
         );
+      }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text(userMessage(e))));
+      }
     } finally {
       if (mounted) setState(() => resetting = false);
     }
