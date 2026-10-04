@@ -13,10 +13,17 @@ class PrincipalApiException implements Exception {
   String toString() => message;
 }
 
+class PrincipalApprovalPending extends PrincipalApiException {
+  PrincipalApprovalPending()
+    : super(
+        'Demande envoyée. Le responsable doit autoriser cet appareil sur le tableau de bord du Principal.',
+      );
+}
+
 class PrincipalApi {
   static const int supportedProtocol = 6;
   static const int defaultPort = 47831;
-  static const String mobileVersion = '0.6.1';
+  static const String mobileVersion = '0.6.2';
   final Duration timeout;
 
   const PrincipalApi({this.timeout = const Duration(seconds: 8)});
@@ -56,6 +63,7 @@ class PrincipalApi {
     required String deviceId,
     int port = defaultPort,
     Duration? pairTimeout,
+    String expectedPrincipalId = '',
   }) async {
     try {
       final uri = Uri.parse('http://$host:$port/api/v1/pair').replace(
@@ -81,7 +89,7 @@ class PrincipalApi {
       }
       if (r.statusCode != 200 || r.bodyBytes.isEmpty) {
         throw PrincipalApiException(
-          'Le Principal répond, mais l’appairage a échoué (${r.statusCode}).',
+          'Le Principal répond, mais la connexion n’a pas abouti. Réessayez.',
         );
       }
       final decoded = jsonDecode(utf8.decode(r.bodyBytes));
@@ -94,6 +102,12 @@ class PrincipalApi {
       final returnedPort =
           int.tryParse((data['port'] ?? port).toString()) ?? port;
       final authorized = data['deviceAuthorized'];
+      if (expectedPrincipalId.isNotEmpty &&
+          data['principalId'] != expectedPrincipalId) {
+        throw PrincipalApiException(
+          'Ce QR ne correspond plus au Principal. Demandez un nouveau QR code.',
+        );
+      }
       if (protocol != supportedProtocol) {
         throw PrincipalApiException(
           'Versions incompatibles. Mettez à jour le Principal et le mobile ensemble.',
@@ -103,9 +117,13 @@ class PrincipalApi {
         throw PrincipalApiException('Réponse du Principal invalide.');
       }
       if (authorized == false) {
-        throw PrincipalApiException(
-          'Cet appareil attend une autorisation ou est désactivé. Sur le Principal : Réseau enseignants > Appareils autorisés.',
-        );
+        if (data['deviceStatus'] == 'refused' ||
+            data['deviceStatus'] == 'disabled') {
+          throw PrincipalApiException(
+            'Cet appareil n’est pas autorisé. Contactez le responsable de l’établissement.',
+          );
+        }
+        throw PrincipalApprovalPending();
       }
       return PrincipalConfig(
         host: host,
@@ -135,6 +153,7 @@ class PrincipalApi {
     String rawHost,
     String rawCode, {
     required String deviceId,
+    String expectedPrincipalId = '',
   }) async {
     final raw = rawHost.trim();
     final parsed = Uri.tryParse(raw.contains('://') ? raw : 'http://$raw');
@@ -166,6 +185,7 @@ class PrincipalApi {
       deviceId: deviceId,
       port: port,
       pairTimeout: const Duration(seconds: 3),
+      expectedPrincipalId: expectedPrincipalId,
     );
     if (found == null) {
       throw PrincipalApiException(
@@ -226,7 +246,7 @@ class PrincipalApi {
         );
       }
       throw PrincipalApiException(
-        'Synchronisation refusée (${r.statusCode})${detail.isEmpty ? '' : ' : $detail'}',
+        'La synchronisation n’a pas abouti. Réessayez ou contactez le responsable.',
       );
     }
     final decoded = jsonDecode(utf8.decode(r.bodyBytes));
@@ -237,7 +257,7 @@ class PrincipalApi {
     if (snapshot.protocolVersion != 0 &&
         snapshot.protocolVersion != supportedProtocol) {
       throw PrincipalApiException(
-        'Version de protocole incompatible : Principal ${snapshot.protocolVersion}, mobile $supportedProtocol.',
+        'Une mise à jour du Principal ou de l’application est nécessaire.',
       );
     }
     final references = await _referenceData(c, deviceId);
@@ -278,7 +298,7 @@ class PrincipalApi {
         );
       }
       throw PrincipalApiException(
-        'Transmission refusée (${r.statusCode})${detail.isEmpty ? '' : ' : $detail'}',
+        'L’envoi n’a pas abouti. Vos saisies restent conservées. Réessayez.',
       );
     }
     if (r.bodyBytes.isEmpty) return {'received': events.length};
@@ -311,7 +331,7 @@ class PrincipalApi {
         .timeout(timeout);
     if (r.statusCode < 200 || r.statusCode >= 300 || r.bodyBytes.isEmpty) {
       throw PrincipalApiException(
-        'Les décisions du Principal ne sont pas disponibles (${r.statusCode}).',
+        'Les décisions du Principal ne sont pas encore disponibles. Réessayez plus tard.',
       );
     }
     final decoded = jsonDecode(utf8.decode(r.bodyBytes));

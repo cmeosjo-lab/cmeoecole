@@ -62,7 +62,7 @@ class _EcoleGestionProfAppState extends State<EcoleGestionProfApp> {
             body: Padding(
               padding: const EdgeInsets.all(24),
               child: SelectableText(
-                'Les données locales n’ont pas pu être ouvertes. Aucune remise à zéro n’a été effectuée.\n\nNe désinstallez pas l’application.\n\n$startupError',
+                'Les données locales n’ont pas pu être ouvertes. Aucune remise à zéro n’a été effectuée.\n\nNe désinstallez pas l’application. Contactez le responsable.',
               ),
             ),
           )

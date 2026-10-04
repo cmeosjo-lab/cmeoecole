@@ -306,6 +306,57 @@ class LocalStore extends ChangeNotifier {
     return rows.map(_event).toList();
   }
 
+  // Archive the visible tracking only, never pending work or original events.
+  // A new Principal decision makes the archived event visible again.
+  Future<List<TeacherEvent>> loadDashboardHistory({
+    bool archived = false,
+  }) async {
+    final d = await _db;
+    return d.transaction((tx) async {
+      final scope = await _scope(tx);
+      final raw = await _get(tx, 'dashboard_hidden:$scope');
+      final hidden = raw == null ? <String, dynamic>{} : _object(raw);
+      final rows = await tx.query(
+        'events',
+        where: "scope = ? AND status != 'pending'",
+        whereArgs: [scope],
+        orderBy: 'created_at, id',
+      );
+      return rows
+          .where((row) {
+            final marker = '${row['status']}|${row['review_note']}';
+            final isHidden = hidden[row['id']] == marker;
+            return archived ? isHidden : !isHidden;
+          })
+          .map(_event)
+          .toList();
+    });
+  }
+
+  Future<int> resetDashboardTracking() async {
+    final d = await _db;
+    final count = await d.transaction((tx) async {
+      final scope = await _scope(tx);
+      final rows = await tx.query(
+        'events',
+        columns: ['id', 'status', 'review_note'],
+        where: "scope = ? AND status != 'pending'",
+        whereArgs: [scope],
+      );
+      await _put(
+        tx,
+        'dashboard_hidden:$scope',
+        jsonEncode({
+          for (final row in rows)
+            row['id'] as String: '${row['status']}|${row['review_note']}',
+        }),
+      );
+      return rows.length;
+    });
+    _changed();
+    return count;
+  }
+
   Future<void> enqueue(TeacherEvent event) => enqueueMany([event]);
   Future<void> enqueueMany(List<TeacherEvent> events) async {
     final d = await _db;
