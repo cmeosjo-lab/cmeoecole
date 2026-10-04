@@ -8,11 +8,11 @@ permissions:
   contents: read
 concurrency:
   group: gestcours-simple-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
   validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 8
     permissions:
       contents: write
     outputs:
@@ -50,7 +50,7 @@ jobs:
         shell: bash
         run: |
           flutter analyze lib test 2>&1 | tee dist/flutter-analyze.txt
-          flutter test --reporter expanded test 2>&1 | tee dist/flutter-tests.txt
+          flutter test --timeout 2m --reporter expanded test 2>&1 | tee dist/flutter-tests.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:
