@@ -9,7 +9,7 @@ class WidgetFollowUpStore extends LocalStore {
   WidgetFollowUpStore(this.pendingItems, this.historyItems)
       : super(legacyValues: const {});
   @override
-  Future<List<TeacherEvent>> loadQueue() async => pendingItems;
+  Future<List<TeacherEvent>> loadQueue({String? scope}) async => pendingItems;
   @override
   Future<List<TeacherEvent>> loadFollowUpHistory({bool archived = false}) async =>
       archived ? [] : historyItems;
