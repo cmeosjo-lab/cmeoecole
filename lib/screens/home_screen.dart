@@ -356,9 +356,11 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('Adresse non modifiée : $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Adresse non modifiée. ${friendlyMessage(e)}'),
+          ),
+        );
       }
     } finally {
       field.dispose();

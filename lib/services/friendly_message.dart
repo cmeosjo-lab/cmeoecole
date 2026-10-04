@@ -6,7 +6,7 @@ String friendlyMessage(Object error) {
   final text = error.toString();
   if (error is PrincipalApiException &&
       !RegExp(
-        r'HTTP|https?://|SocketException|DatabaseException|PRAGMA',
+        r'HTTP|https?://|SocketException|DatabaseException|PRAGMA|\(\d{3}\)|<!?\w|protocole',
         caseSensitive: false,
       ).hasMatch(text)) {
     return text;
