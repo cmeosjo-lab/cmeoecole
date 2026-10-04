@@ -9,20 +9,6 @@ concurrency:
   group: gestcours-v062-${{ github.ref }}
   cancel-in-progress: false
 jobs:
-  qr-library:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/setup-go@v5
-        with:
-          go-version: '1.23.2'
-      - run: |
-          mkdir -p dist
-          go mod download -json github.com/skip2/go-qrcode@v0.0.0-20200617195104-da1b6568686e > dist/qr-module.json
-          python3 -c "import json,shutil; j=json.load(open('dist/qr-module.json')); shutil.copy(j['Zip'],'dist/go-qrcode-source.zip')"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: GESTCOURS_QR_DEPENDANCE
-          path: dist/
   validate:
     runs-on: ubuntu-latest
     permissions:
@@ -47,7 +33,8 @@ jobs:
           p=Path('lib/screens/setup_screen.dart');t=p.read_text().replace('bool busy = false, waiting = false;', 'bool busy = false;').replace('waiting = false; ', '').replace('waiting = true; ', '');p.write_text(t)
           PY
           flutter pub get --enforce-lockfile
-          dart fix --apply lib test
+          dart fix --apply lib
+          dart fix --apply test
           dart format lib test
       - id: source
         name: Conserver les sources réellement testées
