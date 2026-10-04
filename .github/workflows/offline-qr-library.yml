@@ -25,7 +25,8 @@ jobs:
           shutil.copytree(data['Dir'],'package/go-qrcode')
           PY
           cd package/go-qrcode
-          GO111MODULE=off go test ./bitset ./reedsolomon
+          go mod init github.com/skip2/go-qrcode
+          go test ./bitset ./reedsolomon
       - uses: actions/upload-artifact@v4
         with:
           name: GESTCOURS_QR_LIBRARY_PINNED
