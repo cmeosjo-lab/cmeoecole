@@ -26,14 +26,14 @@ jobs:
           flutter-version: '3.47.5'
           channel: stable
           cache: true
-      - name: Appliquer la simplification sans modifier la base ni les migrations
-        run: python3 ci/apply_simple_v062.py
+      - run: python3 ci/apply_simple_v062.py
       - run: flutter pub get --enforce-lockfile
       - name: Formater et enregistrer les sources exactes
         id: source
         shell: bash
         run: |
-          dart fix --apply lib test
+          dart fix --apply lib
+          dart fix --apply test
           dart format lib test integration_test
           git config user.name 'GESTCOURS Build'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
@@ -46,7 +46,7 @@ jobs:
           mkdir -p dist
           git rev-parse HEAD > dist/SOURCE_COMMIT.txt
           git archive --format=zip -o dist/GESTCOURS_MOBILE_V0_6_2_SOURCES.zip HEAD
-      - name: Analyse stricte et tests de protection des saisies
+      - name: Analyse stricte et protection des saisies
         shell: bash
         run: |
           flutter analyze lib test 2>&1 | tee dist/flutter-analyze.txt
@@ -70,7 +70,7 @@ jobs:
           flutter-version: '3.47.5'
           channel: stable
           cache: true
-      - name: Préparer Android en conservant les sources et dépendances vérifiées
+      - name: Préparer Android sans remplacer les sources
         shell: bash
         run: |
           mkdir -p dist
