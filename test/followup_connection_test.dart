@@ -33,7 +33,7 @@ void main() {
   late Directory dir;
   late LocalStore store;
   LocalStore open() => LocalStore(
-    factory: databaseFactoryFfi,
+    factory: databaseFactoryFfiNoIsolate,
     databasePath: '${dir.path}/test.db',
     legacyValues: const {},
   );
@@ -155,7 +155,7 @@ void main() {
     await store.resetFollowup();
     final raw = await store.exportBundle();
     final restored = LocalStore(
-      factory: databaseFactoryFfi,
+      factory: databaseFactoryFfiNoIsolate,
       databasePath: '${dir.path}/restored.db',
       legacyValues: const {},
     );
