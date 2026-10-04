@@ -48,11 +48,12 @@ class _SetupScreenState extends State<SetupScreen> {
 
   void cancelConnection() {
     _attempt++;
-    if (mounted)
+    if (mounted) {
       setState(() {
         busy = false;
         status = 'Connexion interrompue sur ce téléphone.';
       });
+    }
   }
 
   Future<void> connect() async {
@@ -75,8 +76,9 @@ class _SetupScreenState extends State<SetupScreen> {
     try {
       final permission = await PlatformPermissions.ensureLocalNetwork();
       if (!mounted || attempt != _attempt) return;
-      if (!permission.mayProceed)
+      if (!permission.mayProceed) {
         throw PrincipalApiException(permission.message);
+      }
       final deviceId = await widget.store.getOrCreateDeviceId();
       final deadline = DateTime.now().add(const Duration(minutes: 2));
       while (mounted && attempt == _attempt) {
@@ -117,16 +119,18 @@ class _SetupScreenState extends State<SetupScreen> {
         }
       }
     } catch (e) {
-      if (mounted && attempt == _attempt)
+      if (mounted && attempt == _attempt) {
         setState(() {
           error = userMessage(e);
           status = 'Connexion non établie.';
         });
+      }
     } finally {
-      if (mounted && attempt == _attempt)
+      if (mounted && attempt == _attempt) {
         setState(() {
           busy = false;
         });
+      }
     }
   }
 

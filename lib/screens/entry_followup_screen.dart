@@ -47,11 +47,12 @@ class _EntryFollowupScreenState extends State<EntryFollowupScreen> {
         loaded = true;
       });
     } catch (e) {
-      if (mounted && current == generation)
+      if (mounted && current == generation) {
         setState(() {
           error = userMessage(e);
           loaded = true;
         });
+      }
     }
   }
 
@@ -92,7 +93,7 @@ class _EntryFollowupScreenState extends State<EntryFollowupScreen> {
     try {
       final count = await widget.store.resetDashboardHistory();
       await _refresh();
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
@@ -100,11 +101,13 @@ class _EntryFollowupScreenState extends State<EntryFollowupScreen> {
             ),
           ),
         );
+      }
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text(userMessage(e))));
+      }
     } finally {
       if (mounted) setState(() => busy = false);
     }
