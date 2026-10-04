@@ -1,0 +1,34 @@
+name: GESTCOURS - bibliotheque QR hors ligne
+on:
+  workflow_dispatch:
+  push:
+    branches: ['build/v2.4.11-offline-qr']
+permissions:
+  contents: read
+jobs:
+  library:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.2'
+          cache: false
+      - name: Obtenir et tester la bibliothèque libre figée
+        shell: bash
+        run: |
+          mkdir -p package
+          go mod download -json github.com/skip2/go-qrcode@v0.0.0-20200617195104-da1b6568686e > package/module.json
+          python3 - <<'PY'
+          import json,shutil
+          from pathlib import Path
+          data=json.loads(Path('package/module.json').read_text())
+          shutil.copytree(data['Dir'],'package/go-qrcode')
+          PY
+          cd package/go-qrcode
+          GO111MODULE=off go test ./bitset ./reedsolomon
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GESTCOURS_QR_LIBRARY_PINNED
+          path: package/
+          if-no-files-found: error
+          retention-days: 30
