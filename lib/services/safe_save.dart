@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'user_messages.dart';
 
 mixin SafeSave<T extends StatefulWidget> on State<T> {
   bool saving = false;
@@ -12,9 +13,7 @@ mixin SafeSave<T extends StatefulWidget> on State<T> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             duration: const Duration(seconds: 8),
-            content: Text(
-              'Enregistrement impossible. Le formulaire reste ouvert. $e',
-            ),
+            content: Text('Le formulaire reste ouvert. ${userMessage(e)}'),
           ),
         );
       }
