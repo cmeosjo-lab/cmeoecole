@@ -1,0 +1,47 @@
+name: GESTCOURS - recuperation des compilations plume
+on:
+  push:
+    branches: ['build/v2.4.13-packaging-20261005']
+    paths: ['.github/workflows/package-v2413.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: '524aaeea46d8e737bd7d44c050add808941e8284'
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: 37231324368
+          artifact-ids: 11313964275
+          path: incoming
+          merge-multiple: true
+      - name: Separer les fichiers sans modifier les APK
+        run: |
+          mkdir -p arm64 tools source
+          cp incoming/*ARM64*.apk arm64/
+          cp incoming/apksigner.jar incoming/aapt incoming/zipalign tools/
+          cp incoming/*.txt tools/ || true
+          sha256sum incoming/*.apk > tools/APK_ORIGINALES.sha256
+          git archive --format=zip -o source/GESTCOURS_MOBILE_V063_SOURCES.zip HEAD
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GESTCOURS_V2413_ARM64_PLUME_A_SIGNER
+          path: arm64/
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GESTCOURS_V2413_OUTILS_MOBILE
+          path: tools/
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GESTCOURS_V2413_SOURCES_MOBILE
+          path: source/
+          retention-days: 30
